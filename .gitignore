@@ -1,0 +1,49 @@
+# Visual Studio / .NET
+.vs/
+*.user
+*.userosscache
+*.suo
+*.userprefs
+
+# Build output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+
+# .NET tooling
+project.lock.json
+project.fragment.lock.json
+artifacts/
+TestResults/
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+
+# Code coverage
+coverage/
+*.coverage
+*.coveragexml
+
+# Generated files
+GeneratedFiles/
+
+# Rider / ReSharper
+.idea/
+_ReSharper*/
+*.DotSettings.user
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pfx
+*.publishsettings
+
+# Logs
+*.log
