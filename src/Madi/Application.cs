@@ -13,11 +13,14 @@ public sealed class Application
     private readonly IAgent _agent;
     private readonly IWorkSessionStore _store;
     private readonly ModelOptions _defaultModel;
+    private readonly IModelCatalog _modelCatalog;
     private readonly IOAuthAuthentication _authentication;
     private readonly IUserInterface _ui;
 
     private Work? _currentWork;
     private Session? _currentSession;
+    private IReadOnlyList<AvailableModel> _availableModels = [];
+    private ModelOptions _selectedModel;
 
     private enum CommandResult
     {
@@ -30,12 +33,15 @@ public sealed class Application
         IAgent agent,
         IWorkSessionStore store,
         ModelOptions defaultModel,
+        IModelCatalog modelCatalog,
         IOAuthAuthentication authentication,
         IUserInterface ui)
     {
         _agent = agent ?? throw new ArgumentNullException(nameof(agent));
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _defaultModel = defaultModel ?? throw new ArgumentNullException(nameof(defaultModel));
+        _selectedModel = _defaultModel;
+        _modelCatalog = modelCatalog ?? throw new ArgumentNullException(nameof(modelCatalog));
         _authentication = authentication ?? throw new ArgumentNullException(nameof(authentication));
         _ui = ui ?? throw new ArgumentNullException(nameof(ui));
     }
@@ -72,13 +78,19 @@ public sealed class Application
 
     private async Task<int> RunReplAsync(CancellationToken cancellationToken)
     {
+        _availableModels = await _modelCatalog.LoadAsync(cancellationToken);
+        if (_availableModels.Count == 0)
+        {
+            _ui.WriteLine("사용 가능한 모델이 없습니다.");
+            return 1;
+        }
+
         await TryRestoreCurrentConversationAsync(cancellationToken);
-        _ui.WriteLine("Madi REPL입니다. 명령어: /work 제목, /new, /exit");
+        _ui.WriteLine("Madi REPL입니다. 명령어: /model-list, /model 이름, /work 제목, /new, /exit");
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            var workTitle = _currentWork?.Title ?? "Work 없음";
-            _ui.Write($"[{workTitle}] > ");
+            _ui.Write($"[{_selectedModel.Model}] > ");
             var input = await _ui.ReadLineAsync(cancellationToken);
             if (input is null)
             {
@@ -137,6 +149,22 @@ public sealed class Application
             case "/exit" when argument.Length == 0:
                 return CommandResult.Exit;
 
+            case "/model-list" when argument.Length == 0:
+                WriteModelList();
+                return CommandResult.Handled;
+
+            case "/model" when argument.Length > 0:
+                await SelectModelAsync(argument, cancellationToken);
+                return CommandResult.Handled;
+
+            case "/model-list":
+                _ui.WriteLine("사용법: /model-list");
+                return CommandResult.Handled;
+
+            case "/model":
+                _ui.WriteLine("사용법: /model 모델명");
+                return CommandResult.Handled;
+
             case "/work" when argument.Length > 0:
                 await CreateWorkAsync(argument, cancellationToken);
                 return CommandResult.Handled;
@@ -161,6 +189,37 @@ public sealed class Application
                 _ui.WriteLine($"알 수 없는 명령어입니다: {command}");
                 return CommandResult.Handled;
         }
+    }
+
+    private void WriteModelList()
+    {
+        foreach (var model in _availableModels)
+        {
+            var selected = string.Equals(model.Name, _selectedModel.Model, StringComparison.OrdinalIgnoreCase)
+                ? " *"
+                : string.Empty;
+            _ui.WriteLine($"{model.Name} ({model.Provider}, context {model.MaxContextTokens:N0}){selected}");
+        }
+    }
+
+    private async Task SelectModelAsync(string name, CancellationToken cancellationToken)
+    {
+        var model = _availableModels.FirstOrDefault(item =>
+            string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (model is null)
+        {
+            _ui.WriteLine($"사용할 수 없는 모델입니다: {name}");
+            return;
+        }
+
+        _selectedModel = new ModelOptions(model.Name, _selectedModel.ReasoningEffort);
+        if (_currentSession is not null)
+        {
+            _currentSession.Model = _selectedModel;
+            await _store.SaveSessionAsync(_currentSession, cancellationToken);
+        }
+
+        _ui.WriteLine($"모델을 선택했습니다: {model.Name}");
     }
 
     private async Task CreateWorkAsync(
@@ -321,6 +380,7 @@ public sealed class Application
 
         _currentWork = current.Work;
         _currentSession = current.Session;
+        _selectedModel = current.Session.Model;
         return true;
     }
 
@@ -329,7 +389,7 @@ public sealed class Application
         Id = Guid.CreateVersion7().ToString(),
         Title = "새 대화",
         WorkId = workId,
-        Model = _defaultModel,
+        Model = _selectedModel,
     };
 
     private static string CreateSessionTitle(string prompt)
