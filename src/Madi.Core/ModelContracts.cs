@@ -5,7 +5,8 @@ public sealed record ModelRequest(
     IReadOnlyList<ModelInputItem> Input,
     IReadOnlyList<ITool> Tools,
     ModelOptions Options,
-    string Instructions);
+    string Instructions,
+    string PromptCacheKey);
 
 /// <summary>An item that can be supplied as model input on a later turn.</summary>
 public abstract record ModelInputItem;

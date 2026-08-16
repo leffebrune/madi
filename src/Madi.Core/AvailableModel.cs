@@ -8,8 +8,6 @@ public sealed record AvailableModel
     public required string ProviderType { get; init; }
     public string? BaseUrl { get; init; }
     public bool SupportsReasoning { get; init; }
-    public bool SupportsTools { get; init; }
-    public bool SupportsVision { get; init; }
     public int MaxContextTokens { get; init; }
     public int? MaxOutputTokens { get; init; }
 

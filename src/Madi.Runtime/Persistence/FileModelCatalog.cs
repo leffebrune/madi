@@ -48,11 +48,10 @@ public sealed class FileModelCatalog : IModelCatalog
     [
         new AvailableModel
         {
-            Name = "gpt-5",
+            Name = "gpt-5.6-luna",
             Provider = "OpenAI",
             ProviderType = "openai-codex",
             SupportsReasoning = true,
-            SupportsTools = true,
             MaxContextTokens = 400000,
             MaxOutputTokens = 128000,
         },

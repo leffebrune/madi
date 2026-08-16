@@ -60,7 +60,8 @@ public sealed class Agent : IAgent
                     pendingConversation,
                     _tools,
                     session.Model,
-                    BuildInstructions(work, session)),
+                    BuildInstructions(work, session),
+                    session.Id),
                 cancellationToken))
             {
                 switch (item)
