@@ -278,9 +278,16 @@ public sealed class OpenAIOAuthProvider : IModelProvider
             return null;
         }
 
+        var cachedTokens = GetInt32(usage, "input_tokens_details", "cached_tokens");
+        var cacheWriteTokens = GetInt32(usage, "input_tokens_details", "cache_write_tokens");
+        var reasoningTokens = GetInt32(usage, "output_tokens_details", "reasoning_tokens");
+
         return new ModelUsage(
             GetInt32(usage, "input_tokens"),
+            cachedTokens,
+            cacheWriteTokens,
             GetInt32(usage, "output_tokens"),
+            reasoningTokens,
             GetInt32(usage, "total_tokens"));
     }
 
@@ -294,5 +301,14 @@ public sealed class OpenAIOAuthProvider : IModelProvider
         element.TryGetProperty(propertyName, out var property)
         && property.TryGetInt32(out var value)
             ? value
+            : null;
+
+    private static int? GetInt32(
+        JsonElement element,
+        string objectPropertyName,
+        string propertyName) =>
+        element.TryGetProperty(objectPropertyName, out var nested)
+        && nested.ValueKind == JsonValueKind.Object
+            ? GetInt32(nested, propertyName)
             : null;
 }
