@@ -48,7 +48,10 @@ public sealed record ModelOpaqueOutput(
 
 public sealed record ModelUsage(
     int? InputTokens,
+    int? CachedTokens,
+    int? CacheWriteTokens,
     int? OutputTokens,
+    int? ReasoningTokens,
     int? TotalTokens);
 
 public sealed record ModelResponse(

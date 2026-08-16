@@ -94,6 +94,11 @@ public sealed class Agent : IAgent
                     $"Provider '{_provider.Id}' ended without a completed response.");
             }
 
+            if (response.Usage is { } usage)
+            {
+                yield return new AgentUsageReported(usage);
+            }
+
             pendingConversation.AddRange(response.Output);
             var toolCalls = response.Output.OfType<ModelToolCall>().ToArray();
             if (toolCalls.Length == 0)
@@ -111,7 +116,6 @@ public sealed class Agent : IAgent
                 yield return new AgentToolExecutionCompleted(
                     toolCall.CallId,
                     toolCall.Name,
-                    result.Output,
                     result.IsError);
             }
         }

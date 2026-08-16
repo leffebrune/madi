@@ -285,6 +285,7 @@ public sealed class Application
 
         var rawHeaderWritten = false;
         var assistantHeaderWritten = false;
+        var assistantLineOpen = false;
         var responseCompleted = false;
         await foreach (var item in _agent.RespondAsync(
             _currentWork,
@@ -314,17 +315,31 @@ public sealed class Application
                         assistantHeaderWritten = true;
                     }
                     _ui.Write(delta.Text);
+                    assistantLineOpen = true;
                     break;
 
                 case AgentToolCallCompleted toolCall:
+                    FinishAssistantLine();
                     _ui.WriteLine($"=== TOOL CALL: {toolCall.Name} ({toolCall.CallId}) ===");
                     _ui.WriteLine(toolCall.Arguments);
                     break;
 
                 case AgentToolExecutionCompleted result:
-                    var resultLabel = result.IsError ? "TOOL ERROR" : "TOOL RESULT";
+                    FinishAssistantLine();
+                    var resultLabel = result.IsError ? "TOOL ERROR" : "TOOL COMPLETED";
                     _ui.WriteLine($"=== {resultLabel}: {result.Name} ({result.CallId}) ===");
-                    _ui.WriteLine(result.Output);
+                    break;
+
+                case AgentUsageReported reported:
+                    FinishAssistantLine();
+                    var usage = reported.Usage;
+                    _ui.WriteLine(
+                        $"=== TOKEN USAGE: input={FormatTokenCount(usage.InputTokens)}, " +
+                        $"cached={FormatTokenCount(usage.CachedTokens)}, " +
+                        $"cache_write={FormatTokenCount(usage.CacheWriteTokens)}, " +
+                        $"output={FormatTokenCount(usage.OutputTokens)}, " +
+                        $"reasoning={FormatTokenCount(usage.ReasoningTokens)}, " +
+                        $"total={FormatTokenCount(usage.TotalTokens)} ===");
                     break;
 
                 case AgentResponseCompleted completed when ShowRawProviderEvents:
@@ -334,10 +349,21 @@ public sealed class Application
                     break;
 
                 case AgentResponseCompleted when !ShowRawProviderEvents:
-                    _ui.WriteLine(string.Empty);
+                    FinishAssistantLine();
                     responseCompleted = true;
                     break;
             }
+        }
+
+        void FinishAssistantLine()
+        {
+            if (!assistantLineOpen)
+            {
+                return;
+            }
+
+            _ui.WriteLine(string.Empty);
+            assistantLineOpen = false;
         }
 
         if (responseCompleted)
@@ -349,6 +375,8 @@ public sealed class Application
             await _store.SaveSessionAsync(session, cancellationToken);
         }
     }
+
+    private static string FormatTokenCount(int? count) => count?.ToString() ?? "n/a";
 
     private async Task EnsureCurrentConversationAsync(
         CancellationToken cancellationToken)

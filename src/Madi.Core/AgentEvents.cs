@@ -16,7 +16,8 @@ public sealed record AgentToolCallCompleted(
 public sealed record AgentToolExecutionCompleted(
     string CallId,
     string Name,
-    string Output,
     bool IsError) : AgentEvent;
+
+public sealed record AgentUsageReported(ModelUsage Usage) : AgentEvent;
 
 public sealed record AgentResponseCompleted(string Text) : AgentEvent;
