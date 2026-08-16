@@ -26,7 +26,7 @@ public sealed class OpenAIOAuthProvider : IModelProvider
         ArgumentNullException.ThrowIfNull(request);
 
         var requestId = Guid.CreateVersion7().ToString();
-        var content = CreateRequestBody(request, requestId);
+        var content = CreateRequestBody(request);
         yield return new ModelRequestStarted(content);
 
         var headers = new Dictionary<string, string>
@@ -114,7 +114,7 @@ public sealed class OpenAIOAuthProvider : IModelProvider
         }
     }
 
-    private string CreateRequestBody(ModelRequest request, string requestId)
+    private string CreateRequestBody(ModelRequest request)
     {
         using var output = new MemoryStream();
         using (var writer = new Utf8JsonWriter(output))
@@ -154,7 +154,7 @@ public sealed class OpenAIOAuthProvider : IModelProvider
                 }
                 writer.WriteEndArray();
             }
-            writer.WriteString("prompt_cache_key", requestId);
+            writer.WriteString("prompt_cache_key", request.PromptCacheKey);
             writer.WriteString("tool_choice", "auto");
             writer.WriteBoolean("parallel_tool_calls", false);
             if (request.Options.ReasoningEffort is { } effort)
