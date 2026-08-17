@@ -11,4 +11,12 @@
     <ProjectReference Include="..\Madi.Networking\Madi.Networking.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+    <PackageReference Include="Vecc.YamlDotNet.Analyzers.StaticGenerator" Version="18.1.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
 </Project>

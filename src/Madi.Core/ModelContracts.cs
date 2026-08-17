@@ -6,7 +6,8 @@ public sealed record ModelRequest(
     IReadOnlyList<ITool> Tools,
     ModelOptions Options,
     string Instructions,
-    string PromptCacheKey);
+    string PromptCacheKey,
+    bool AllowParallelToolCalls = false);
 
 /// <summary>An item that can be supplied as model input on a later turn.</summary>
 public abstract record ModelInputItem;

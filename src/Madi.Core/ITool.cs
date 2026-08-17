@@ -12,7 +12,18 @@ public interface ITool
     /// <summary>JSON Schema for the arguments accepted by this tool.</summary>
     JsonElement Parameters { get; }
 
+    /// <summary>
+    /// Whether multiple calls to this tool from one model response may execute concurrently.
+    /// </summary>
+    bool SupportsParallelExecution => false;
+
     Task<string> ExecuteAsync(
         JsonElement arguments,
         CancellationToken cancellationToken = default);
+}
+
+/// <summary>A tool that delegates work to a named subagent.</summary>
+public interface ISubagentTool : ITool
+{
+    string GetSubagentName(JsonElement arguments);
 }
