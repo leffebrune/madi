@@ -41,7 +41,7 @@ public static class Program
         IWorkSessionStore store = new FileWorkSessionStore(storageRoot);
         IModelCatalog modelCatalog = new FileModelCatalog(storageRoot);
         var defaultModel = new ModelOptions(
-            "gpt-5",
+            "gpt-5.6-luna",
             ReasoningEffort.Medium);
 
         IUserInterface ui = new ConsoleUserInterface();

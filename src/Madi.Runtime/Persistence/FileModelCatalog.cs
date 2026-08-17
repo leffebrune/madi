@@ -31,14 +31,37 @@ public sealed class FileModelCatalog : IModelCatalog
             return defaults;
         }
 
-        await using var input = File.OpenRead(_path);
-        var models = await JsonSerializer.DeserializeAsync(
-            input,
-            ModelCatalogJsonContext.Default.ListAvailableModel,
-            cancellationToken) ?? [];
-        foreach (var model in models)
+        List<AvailableModel> models;
+        await using (var input = File.OpenRead(_path))
         {
+            models = await JsonSerializer.DeserializeAsync(
+                input,
+                ModelCatalogJsonContext.Default.ListAvailableModel,
+                cancellationToken) ?? [];
+        }
+
+        var migrated = false;
+        for (var index = 0; index < models.Count; index++)
+        {
+            var model = models[index];
+            if (string.IsNullOrWhiteSpace(model.ModelName))
+            {
+                model = model with { ModelName = model.Name };
+                models[index] = model;
+                migrated = true;
+            }
+
             model.Validate();
+        }
+
+        if (migrated)
+        {
+            await using var output = File.Create(_path);
+            await JsonSerializer.SerializeAsync(
+                output,
+                models,
+                ModelCatalogJsonContext.Default.ListAvailableModel,
+                cancellationToken);
         }
 
         return models;
@@ -48,7 +71,8 @@ public sealed class FileModelCatalog : IModelCatalog
     [
         new AvailableModel
         {
-            Name = "gpt-5.6-luna",
+            Name = "luna",
+            ModelName = "gpt-5.6-luna",
             Provider = "OpenAI",
             ProviderType = "openai-codex",
             SupportsReasoning = true,
