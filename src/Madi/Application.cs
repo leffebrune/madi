@@ -195,10 +195,14 @@ public sealed class Application
     {
         foreach (var model in _availableModels)
         {
-            var selected = string.Equals(model.Name, _selectedModel.Model, StringComparison.OrdinalIgnoreCase)
+            var selected = string.Equals(
+                    model.ModelName,
+                    _selectedModel.Model,
+                    StringComparison.OrdinalIgnoreCase)
                 ? " *"
                 : string.Empty;
-            _ui.WriteLine($"{model.Name} ({model.Provider}, context {model.MaxContextTokens:N0}){selected}");
+            _ui.WriteLine(
+                $"{model.Name} ({model.ModelName}, {model.Provider}, context {model.MaxContextTokens:N0}){selected}");
         }
     }
 
@@ -212,7 +216,7 @@ public sealed class Application
             return;
         }
 
-        _selectedModel = new ModelOptions(model.Name, _selectedModel.ReasoningEffort);
+        _selectedModel = new ModelOptions(model.ModelName, _selectedModel.ReasoningEffort);
         if (_currentSession is not null)
         {
             _currentSession.Model = _selectedModel;
