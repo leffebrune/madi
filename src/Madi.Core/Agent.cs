@@ -61,7 +61,8 @@ public sealed class Agent : IAgent
                     _tools,
                     session.Model,
                     BuildInstructions(work, session),
-                    session.Id),
+                    session.Id,
+                    _tools.Any(static tool => tool.SupportsParallelExecution)),
                 cancellationToken))
             {
                 switch (item)
@@ -77,10 +78,13 @@ public sealed class Agent : IAgent
                         break;
                     case ModelOutputItemCompleted completed
                         when completed.Item is ModelToolCall toolCall:
-                        yield return new AgentToolCallCompleted(
-                            toolCall.CallId,
-                            toolCall.Name,
-                            toolCall.Arguments);
+                        if (!IsSubagentTool(toolCall.Name))
+                        {
+                            yield return new AgentToolCallCompleted(
+                                toolCall.CallId,
+                                toolCall.Name,
+                                toolCall.Arguments);
+                        }
                         break;
                     case ModelResponseCompleted completed:
                         response = completed.Response;
@@ -109,14 +113,85 @@ public sealed class Agent : IAgent
                 yield break;
             }
 
-            foreach (var toolCall in toolCalls)
+            var runInParallel = toolCalls.Length > 1
+                                && toolCalls.All(CanRunInParallel);
+            if (runInParallel)
             {
-                var result = await ExecuteToolAsync(toolCall, cancellationToken);
-                pendingConversation.Add(new ToolResult(toolCall.CallId, result.Output));
-                yield return new AgentToolExecutionCompleted(
-                    toolCall.CallId,
-                    toolCall.Name,
-                    result.IsError);
+                foreach (var toolCall in toolCalls)
+                {
+                    if (GetSubagentName(toolCall) is { } subagentName)
+                    {
+                        yield return new AgentSubagentStarted(toolCall.CallId, subagentName);
+                    }
+                }
+
+                var executions = toolCalls
+                    .Select((call, index) => new PendingToolExecution(
+                        index,
+                        call,
+                        ExecuteToolAsync(call, cancellationToken)))
+                    .ToList();
+                var results = new ToolExecutionResult[toolCalls.Length];
+                while (executions.Count > 0)
+                {
+                    var completedTask = await Task.WhenAny(
+                        executions.Select(static execution => execution.Task));
+                    var completedIndex = executions.FindIndex(
+                        execution => ReferenceEquals(execution.Task, completedTask));
+                    var execution = executions[completedIndex];
+                    executions.RemoveAt(completedIndex);
+                    var result = await completedTask;
+                    results[execution.Index] = result;
+                    if (GetSubagentName(execution.Call) is { } subagentName)
+                    {
+                        yield return new AgentSubagentCompleted(
+                            execution.Call.CallId,
+                            subagentName,
+                            result.IsError);
+                    }
+                    else
+                    {
+                        yield return new AgentToolExecutionCompleted(
+                            execution.Call.CallId,
+                            execution.Call.Name,
+                            result.IsError);
+                    }
+                }
+
+                for (var index = 0; index < toolCalls.Length; index++)
+                {
+                    pendingConversation.Add(new ToolResult(
+                        toolCalls[index].CallId,
+                        results[index].Output));
+                }
+            }
+            else
+            {
+                foreach (var toolCall in toolCalls)
+                {
+                    var subagentName = GetSubagentName(toolCall);
+                    if (subagentName is not null)
+                    {
+                        yield return new AgentSubagentStarted(toolCall.CallId, subagentName);
+                    }
+
+                    var result = await ExecuteToolAsync(toolCall, cancellationToken);
+                    pendingConversation.Add(new ToolResult(toolCall.CallId, result.Output));
+                    if (subagentName is not null)
+                    {
+                        yield return new AgentSubagentCompleted(
+                            toolCall.CallId,
+                            subagentName,
+                            result.IsError);
+                    }
+                    else
+                    {
+                        yield return new AgentToolExecutionCompleted(
+                            toolCall.CallId,
+                            toolCall.Name,
+                            result.IsError);
+                    }
+                }
             }
         }
 
@@ -180,6 +255,38 @@ public sealed class Agent : IAgent
             return ToolExecutionResult.Error($"Tool '{call.Name}' failed: {exception.Message}");
         }
     }
+
+    private bool CanRunInParallel(ModelToolCall call) =>
+        _toolsByName.TryGetValue(call.Name, out var tool)
+        && tool.SupportsParallelExecution;
+
+    private bool IsSubagentTool(string name) =>
+        _toolsByName.TryGetValue(name, out var tool)
+        && tool is ISubagentTool;
+
+    private string? GetSubagentName(ModelToolCall call)
+    {
+        if (!_toolsByName.TryGetValue(call.Name, out var tool)
+            || tool is not ISubagentTool subagentTool)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var arguments = JsonDocument.Parse(call.Arguments);
+            return subagentTool.GetSubagentName(arguments.RootElement);
+        }
+        catch (Exception exception) when (exception is JsonException or ArgumentException)
+        {
+            return "unknown";
+        }
+    }
+
+    private sealed record PendingToolExecution(
+        int Index,
+        ModelToolCall Call,
+        Task<ToolExecutionResult> Task);
 
     private sealed record ToolExecutionResult(string Output, bool IsError)
     {

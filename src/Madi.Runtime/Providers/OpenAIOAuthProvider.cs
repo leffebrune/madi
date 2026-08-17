@@ -156,7 +156,7 @@ public sealed class OpenAIOAuthProvider : IModelProvider
             }
             writer.WriteString("prompt_cache_key", request.PromptCacheKey);
             writer.WriteString("tool_choice", "auto");
-            writer.WriteBoolean("parallel_tool_calls", false);
+            writer.WriteBoolean("parallel_tool_calls", request.AllowParallelToolCalls);
             if (request.Options.ReasoningEffort is { } effort)
             {
                 writer.WriteStartObject("reasoning");

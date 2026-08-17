@@ -13,13 +13,12 @@ public sealed class Application
     private readonly IAgent _agent;
     private readonly IWorkSessionStore _store;
     private readonly ModelOptions _defaultModel;
-    private readonly IModelCatalog _modelCatalog;
     private readonly IOAuthAuthentication _authentication;
     private readonly IUserInterface _ui;
 
     private Work? _currentWork;
     private Session? _currentSession;
-    private IReadOnlyList<AvailableModel> _availableModels = [];
+    private readonly IReadOnlyList<AvailableModel> _availableModels;
     private ModelOptions _selectedModel;
 
     private enum CommandResult
@@ -33,7 +32,7 @@ public sealed class Application
         IAgent agent,
         IWorkSessionStore store,
         ModelOptions defaultModel,
-        IModelCatalog modelCatalog,
+        IReadOnlyList<AvailableModel> availableModels,
         IOAuthAuthentication authentication,
         IUserInterface ui)
     {
@@ -41,7 +40,7 @@ public sealed class Application
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _defaultModel = defaultModel ?? throw new ArgumentNullException(nameof(defaultModel));
         _selectedModel = _defaultModel;
-        _modelCatalog = modelCatalog ?? throw new ArgumentNullException(nameof(modelCatalog));
+        _availableModels = availableModels ?? throw new ArgumentNullException(nameof(availableModels));
         _authentication = authentication ?? throw new ArgumentNullException(nameof(authentication));
         _ui = ui ?? throw new ArgumentNullException(nameof(ui));
     }
@@ -78,7 +77,6 @@ public sealed class Application
 
     private async Task<int> RunReplAsync(CancellationToken cancellationToken)
     {
-        _availableModels = await _modelCatalog.LoadAsync(cancellationToken);
         if (_availableModels.Count == 0)
         {
             _ui.WriteLine("사용 가능한 모델이 없습니다.");
@@ -332,6 +330,18 @@ public sealed class Application
                     FinishAssistantLine();
                     var resultLabel = result.IsError ? "TOOL ERROR" : "TOOL COMPLETED";
                     _ui.WriteLine($"=== {resultLabel}: {result.Name} ({result.CallId}) ===");
+                    break;
+
+                case AgentSubagentStarted started:
+                    FinishAssistantLine();
+                    _ui.WriteLine($"=== SUBAGENT STARTED: {started.Name} ({started.CallId}) ===");
+                    break;
+
+                case AgentSubagentCompleted completed:
+                    FinishAssistantLine();
+                    var subagentResult = completed.IsError ? "FAILED" : "COMPLETED";
+                    _ui.WriteLine(
+                        $"=== SUBAGENT {subagentResult}: {completed.Name} ({completed.CallId}) ===");
                     break;
 
                 case AgentUsageReported reported:
