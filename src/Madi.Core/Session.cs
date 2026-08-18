@@ -8,7 +8,7 @@ public sealed class Session
 
     public required ModelOptions Model { get; set; }
 
-    public int MaxToolRounds { get; set; } = 16;
+    public int MaxToolRounds { get; set; } = 30;
 
     public string Instructions { get; set; } = "You are a helpful assistant.";
 

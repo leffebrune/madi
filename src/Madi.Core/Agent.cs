@@ -119,9 +119,13 @@ public sealed class Agent : IAgent
             {
                 foreach (var toolCall in toolCalls)
                 {
-                    if (GetSubagentName(toolCall) is { } subagentName)
+                    if (GetSubagentName(toolCall) is { } subagentName
+                        && GetSubagentPrompt(toolCall) is { } subagentPrompt)
                     {
-                        yield return new AgentSubagentStarted(toolCall.CallId, subagentName);
+                        yield return new AgentSubagentStarted(
+                            toolCall.CallId,
+                            subagentName,
+                            subagentPrompt);
                     }
                 }
 
@@ -147,6 +151,7 @@ public sealed class Agent : IAgent
                         yield return new AgentSubagentCompleted(
                             execution.Call.CallId,
                             subagentName,
+                            result.Output,
                             result.IsError);
                     }
                     else
@@ -170,9 +175,13 @@ public sealed class Agent : IAgent
                 foreach (var toolCall in toolCalls)
                 {
                     var subagentName = GetSubagentName(toolCall);
-                    if (subagentName is not null)
+                    if (subagentName is not null
+                        && GetSubagentPrompt(toolCall) is { } subagentPrompt)
                     {
-                        yield return new AgentSubagentStarted(toolCall.CallId, subagentName);
+                        yield return new AgentSubagentStarted(
+                            toolCall.CallId,
+                            subagentName,
+                            subagentPrompt);
                     }
 
                     var result = await ExecuteToolAsync(toolCall, cancellationToken);
@@ -182,6 +191,7 @@ public sealed class Agent : IAgent
                         yield return new AgentSubagentCompleted(
                             toolCall.CallId,
                             subagentName,
+                            result.Output,
                             result.IsError);
                     }
                     else
@@ -280,6 +290,25 @@ public sealed class Agent : IAgent
         catch (Exception exception) when (exception is JsonException or ArgumentException)
         {
             return "unknown";
+        }
+    }
+
+    private string? GetSubagentPrompt(ModelToolCall call)
+    {
+        if (!_toolsByName.TryGetValue(call.Name, out var tool)
+            || tool is not ISubagentTool subagentTool)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var arguments = JsonDocument.Parse(call.Arguments);
+            return subagentTool.GetSubagentPrompt(arguments.RootElement);
+        }
+        catch (Exception exception) when (exception is JsonException or ArgumentException)
+        {
+            return null;
         }
     }
 

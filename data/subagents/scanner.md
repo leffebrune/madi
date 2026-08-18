@@ -1,7 +1,7 @@
 ---
 name: scanner
 description: Explores the codebase to find relevant files, existing patterns, dependencies, and likely change points.
-model: luna:medium
+model: OpenAI/gpt-5.6-luna:medium
 tools:
   - read
   - bash

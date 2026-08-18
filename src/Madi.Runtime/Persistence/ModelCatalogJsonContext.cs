@@ -1,10 +1,10 @@
 using System.Text.Json.Serialization;
-using Madi.Core;
 
 namespace Madi.Runtime.Persistence;
 
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     WriteIndented = true)]
-[JsonSerializable(typeof(List<AvailableModel>))]
+[JsonSerializable(typeof(List<ModelProviderDocument>))]
+[JsonSerializable(typeof(List<LegacyModelDocument>))]
 internal sealed partial class ModelCatalogJsonContext : JsonSerializerContext;

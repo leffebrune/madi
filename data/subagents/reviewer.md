@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Reviews code changes for correctness, regressions, missing validation, and maintainability risks.
-model: luna:high
+model: OpenAI/gpt-5.6-luna:high
 tools:
   - read
   - bash

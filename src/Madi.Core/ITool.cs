@@ -26,4 +26,6 @@ public interface ITool
 public interface ISubagentTool : ITool
 {
     string GetSubagentName(JsonElement arguments);
+
+    string GetSubagentPrompt(JsonElement arguments);
 }

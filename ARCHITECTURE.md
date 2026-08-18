@@ -21,6 +21,7 @@ Madi ───────────────> Madi.Core
 `Madi.Core` and `Madi.Networking` have no project dependencies. `Madi.Runtime` implements Core contracts and owns provider-specific request semantics and networking configuration, filesystem/process access, OAuth, credential persistence, and Work/Session persistence. `Madi.Networking` remains provider-neutral and owns wire-level HTTP and SSE behavior. Concrete implementations are selected only in the `Madi` composition root.
 
 Subagent definitions are read from `MADI_HOME/subagents`, or the `subagents` directory under the default local application data root. The directory is optional and read-only from Madi's perspective: no directory or definition files are created automatically. Valid definitions are exposed to the main agent through a parallel-capable delegation tool. Subagent sessions are ephemeral, use only the tools allowed by their definition, and are not persisted independently.
+Their model setting uses the `provider/name:effort` format and is resolved against both the provider and model name in the model catalog.
 
 Work and Session metadata are stored independently. Session conversations use an append-only JSONL stream so Work remains a small logical grouping and unscoped sessions can use a null `WorkId`. The active session pointer is stored separately and determines the Work, if any, during restoration.
 
