@@ -194,13 +194,13 @@ public sealed class Application
         foreach (var model in _availableModels)
         {
             var selected = string.Equals(
-                    model.ModelName,
+                    model.Name,
                     _selectedModel.Model,
                     StringComparison.OrdinalIgnoreCase)
                 ? " *"
                 : string.Empty;
             _ui.WriteLine(
-                $"{model.Name} ({model.ModelName}, {model.Provider}, context {model.MaxContextTokens:N0}){selected}");
+                $"{model.Name} ({model.Provider}, context {model.MaxContextTokens:N0}){selected}");
         }
     }
 
@@ -214,7 +214,7 @@ public sealed class Application
             return;
         }
 
-        _selectedModel = new ModelOptions(model.ModelName, _selectedModel.ReasoningEffort);
+        _selectedModel = new ModelOptions(model.Name, _selectedModel.ReasoningEffort);
         if (_currentSession is not null)
         {
             _currentSession.Model = _selectedModel;
@@ -334,14 +334,16 @@ public sealed class Application
 
                 case AgentSubagentStarted started:
                     FinishAssistantLine();
-                    _ui.WriteLine($"=== SUBAGENT STARTED: {started.Name} ({started.CallId}) ===");
+                    _ui.WriteLine($"=== SUBAGENT PROMPT: {started.Name} ({started.CallId}) ===");
+                    _ui.WriteLine(started.Prompt);
                     break;
 
                 case AgentSubagentCompleted completed:
                     FinishAssistantLine();
-                    var subagentResult = completed.IsError ? "FAILED" : "COMPLETED";
+                    var subagentResult = completed.IsError ? "ERROR" : "RESPONSE";
                     _ui.WriteLine(
                         $"=== SUBAGENT {subagentResult}: {completed.Name} ({completed.CallId}) ===");
+                    _ui.WriteLine(completed.Response);
                     break;
 
                 case AgentUsageReported reported:

@@ -28,12 +28,15 @@ public sealed class SubagentTool : ISubagentTool
     public string GetSubagentName(JsonElement arguments) =>
         ToolSupport.GetRequiredString(arguments, "name");
 
+    public string GetSubagentPrompt(JsonElement arguments) =>
+        ToolSupport.GetRequiredString(arguments, "task");
+
     public Task<string> ExecuteAsync(
         JsonElement arguments,
         CancellationToken cancellationToken = default) =>
         _runner.RunAsync(
             GetSubagentName(arguments),
-            ToolSupport.GetRequiredString(arguments, "task"),
+            GetSubagentPrompt(arguments),
             cancellationToken);
 
     private static string CreateDescription(IReadOnlyList<SubagentDefinition> definitions)

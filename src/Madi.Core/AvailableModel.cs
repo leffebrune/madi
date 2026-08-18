@@ -3,14 +3,11 @@ namespace Madi.Core;
 /// <summary>Metadata describing a model that can be selected by the user.</summary>
 public sealed record AvailableModel
 {
-    /// <summary>Application-local identifier used for selection and configuration.</summary>
+    /// <summary>Provider model name sent in API requests.</summary>
     public required string Name { get; init; }
 
-    /// <summary>Provider model name sent in API requests.</summary>
-    public required string ModelName { get; init; }
-
     public required string Provider { get; init; }
-    public required string ProviderType { get; init; }
+    public required string Api { get; init; }
     public string? BaseUrl { get; init; }
     public bool SupportsReasoning { get; init; }
     public int MaxContextTokens { get; init; }
@@ -19,12 +16,11 @@ public sealed record AvailableModel
     public void Validate()
     {
         if (string.IsNullOrWhiteSpace(Name)
-            || string.IsNullOrWhiteSpace(ModelName)
             || string.IsNullOrWhiteSpace(Provider)
-            || string.IsNullOrWhiteSpace(ProviderType))
+            || string.IsNullOrWhiteSpace(Api))
         {
             throw new InvalidDataException(
-                "Model identifier, provider model name, provider, and provider type are required.");
+                "Model name, provider, and provider API are required.");
         }
 
         if (MaxContextTokens <= 0)

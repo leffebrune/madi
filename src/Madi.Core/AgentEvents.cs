@@ -20,11 +20,13 @@ public sealed record AgentToolExecutionCompleted(
 
 public sealed record AgentSubagentStarted(
     string CallId,
-    string Name) : AgentEvent;
+    string Name,
+    string Prompt) : AgentEvent;
 
 public sealed record AgentSubagentCompleted(
     string CallId,
     string Name,
+    string Response,
     bool IsError) : AgentEvent;
 
 public sealed record AgentUsageReported(ModelUsage Usage) : AgentEvent;

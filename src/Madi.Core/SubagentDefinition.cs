@@ -58,37 +58,42 @@ public sealed record SubagentDefinition
     {
         ArgumentNullException.ThrowIfNull(availableModels);
 
-        var (name, effort) = ParseModel();
+        var (provider, name, effort) = ParseModel();
         var availableModel = availableModels.FirstOrDefault(model =>
-            string.Equals(model.Name, name, StringComparison.OrdinalIgnoreCase));
+            string.Equals(model.Provider, provider, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(model.Name, name, StringComparison.OrdinalIgnoreCase));
         if (availableModel is null)
         {
             throw new InvalidDataException(
-                $"Subagent '{Name}' references unavailable model '{name}'.");
+                $"Subagent '{Name}' references unavailable model '{provider}/{name}'.");
         }
 
-        return new ModelOptions(availableModel.ModelName, effort);
+        return new ModelOptions(availableModel.Name, effort);
     }
 
-    private (string Name, ReasoningEffort Effort) ParseModel()
+    private (string Provider, string Name, ReasoningEffort Effort) ParseModel()
     {
         if (string.IsNullOrWhiteSpace(Model))
         {
             throw new InvalidDataException($"Subagent '{Name}' requires a model setting.");
         }
 
-        var separator = Model.IndexOf(':');
-        if (separator <= 0
-            || separator == Model.Length - 1
-            || separator != Model.LastIndexOf(':'))
+        var effortSeparator = Model.LastIndexOf(':');
+        var providerSeparator = Model.IndexOf('/');
+        if (providerSeparator <= 0
+            || providerSeparator == effortSeparator - 1
+            || effortSeparator <= providerSeparator
+            || effortSeparator == Model.Length - 1)
         {
             throw new InvalidDataException(
-                $"Subagent '{Name}' model must use the '<available-model-name>:<reasoning-effort>' format.");
+                $"Subagent '{Name}' model must use the '<provider>/<model-name>:<reasoning-effort>' format.");
         }
 
-        var modelName = Model[..separator].Trim();
-        var effortName = Model[(separator + 1)..].Trim();
-        if (modelName.Length == 0
+        var provider = Model[..providerSeparator].Trim();
+        var modelName = Model[(providerSeparator + 1)..effortSeparator].Trim();
+        var effortName = Model[(effortSeparator + 1)..].Trim();
+        if (provider.Length == 0
+            || modelName.Length == 0
             || !Enum.TryParse<ReasoningEffort>(effortName, true, out var effort)
             || !Enum.IsDefined(effort))
         {
@@ -96,7 +101,7 @@ public sealed record SubagentDefinition
                 $"Subagent '{Name}' has an invalid model setting '{Model}'.");
         }
 
-        return (modelName, effort);
+        return (provider, modelName, effort);
     }
 
     private static bool IsValidName(string name)
