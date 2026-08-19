@@ -10,12 +10,15 @@ public sealed class ToolCatalog
 {
     private readonly IReadOnlyDictionary<string, ITool> _tools;
 
-    public ToolCatalog(string? workingDirectory = null, string? shellPath = null)
+    public ToolCatalog(
+        string? workingDirectory = null,
+        string? shellPath = null,
+        string? utilityBinDirectory = null)
     {
         WorkingDirectory = Path.GetFullPath(workingDirectory ?? Environment.CurrentDirectory);
         Read = new ReadTool(WorkingDirectory);
         Write = new WriteTool(WorkingDirectory);
-        Bash = new BashTool(WorkingDirectory, shellPath);
+        Bash = new BashTool(WorkingDirectory, shellPath, utilityBinDirectory);
         Edit = new EditTool(WorkingDirectory);
         All = [Read, Write, Bash, Edit];
         _tools = All.ToDictionary(static tool => tool.Name, StringComparer.Ordinal);

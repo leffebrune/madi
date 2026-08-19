@@ -1,6 +1,8 @@
 using Madi.Core;
 using Madi.Runtime.Authentication;
+using Madi.Services;
 using Madi.UI;
+using System.Runtime.InteropServices;
 
 namespace Madi;
 
@@ -15,6 +17,8 @@ public sealed class Application
     private readonly ModelOptions _defaultModel;
     private readonly IOAuthAuthentication _authentication;
     private readonly IUserInterface _ui;
+    private readonly IGitHubReleaseFileDownloader _releaseFileDownloader;
+    private readonly string _utilityBinDirectory;
 
     private Work? _currentWork;
     private Session? _currentSession;
@@ -34,7 +38,9 @@ public sealed class Application
         ModelOptions defaultModel,
         IReadOnlyList<AvailableModel> availableModels,
         IOAuthAuthentication authentication,
-        IUserInterface ui)
+        IUserInterface ui,
+        IGitHubReleaseFileDownloader releaseFileDownloader,
+        string utilityBinDirectory)
     {
         _agent = agent ?? throw new ArgumentNullException(nameof(agent));
         _store = store ?? throw new ArgumentNullException(nameof(store));
@@ -43,10 +49,16 @@ public sealed class Application
         _availableModels = availableModels ?? throw new ArgumentNullException(nameof(availableModels));
         _authentication = authentication ?? throw new ArgumentNullException(nameof(authentication));
         _ui = ui ?? throw new ArgumentNullException(nameof(ui));
+        _releaseFileDownloader = releaseFileDownloader
+            ?? throw new ArgumentNullException(nameof(releaseFileDownloader));
+        ArgumentException.ThrowIfNullOrWhiteSpace(utilityBinDirectory);
+        _utilityBinDirectory = Path.GetFullPath(utilityBinDirectory);
     }
 
     public async Task<int> RunAsync(string[] args, CancellationToken cancellationToken)
     {
+        await EnsureUtilitiesAsync(cancellationToken);
+
         var command = args.FirstOrDefault()?.ToLowerInvariant();
         switch (command)
         {
@@ -72,6 +84,57 @@ public sealed class Application
             default:
                 _ui.WriteLine("사용법: dotnet run --project src/Madi -- [repl | login | hello | logout]");
                 return 1;
+        }
+    }
+
+    private async Task EnsureUtilitiesAsync(CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows()
+            || RuntimeInformation.ProcessArchitecture != Architecture.X64)
+        {
+            _ui.WriteLine("경고: fd/rg 자동 설치는 Windows x64에서만 지원됩니다.");
+            return;
+        }
+
+        var utilities = new[]
+        {
+            new GitHubReleaseFileRequest(
+                "sharkdp",
+                "fd",
+                "x86_64-pc-windows-msvc.zip",
+                "fd.exe",
+                Path.Combine(_utilityBinDirectory, "fd.exe")),
+            new GitHubReleaseFileRequest(
+                "BurntSushi",
+                "ripgrep",
+                "x86_64-pc-windows-msvc.zip",
+                "rg.exe",
+                Path.Combine(_utilityBinDirectory, "rg.exe")),
+        };
+
+        foreach (var utility in utilities)
+        {
+            if (File.Exists(utility.DestinationPath))
+            {
+                continue;
+            }
+
+            try
+            {
+                await _releaseFileDownloader.DownloadLatestReleaseFileAsync(
+                    utility,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                _ui.WriteLine(
+                    $"경고: {utility.ArchiveEntryFileName}을(를) 설치하지 못했습니다: " +
+                    exception.Message);
+            }
         }
     }
 

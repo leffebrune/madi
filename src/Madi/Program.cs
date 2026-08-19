@@ -5,6 +5,7 @@ using Madi.Runtime.Authentication;
 using Madi.Runtime.Persistence;
 using Madi.Runtime.Providers;
 using Madi.Runtime.Tools;
+using Madi.Services;
 using Madi.UI;
 
 namespace Madi;
@@ -35,13 +36,18 @@ public static class Program
                     "madi");
             }
 
+            storageRoot = Path.GetFullPath(storageRoot);
+            var utilityBinDirectory = Path.Combine(storageRoot, "bin");
+
             IWorkSessionStore store = new FileWorkSessionStore(storageRoot);
             IModelCatalog modelCatalog = new FileModelCatalog(storageRoot);
             var availableModels = await modelCatalog.LoadAsync(cancellation.Token);
             ISubagentCatalog subagentCatalog = new FileSubagentCatalog(storageRoot);
             var subagentDefinitions = await subagentCatalog.LoadAsync(cancellation.Token);
 
-            var tools = new ToolCatalog(Environment.CurrentDirectory);
+            var tools = new ToolCatalog(
+                Environment.CurrentDirectory,
+                utilityBinDirectory: utilityBinDirectory);
             INetworkClient client = new NetworkClient(
                 OpenAINetworkConfiguration.Create(authentication));
             IModelProvider provider = new OpenAIOAuthProvider(client);
@@ -62,13 +68,17 @@ public static class Program
                 ReasoningEffort.Medium);
 
             IUserInterface ui = new ConsoleUserInterface();
+            IGitHubReleaseFileDownloader releaseFileDownloader =
+                new GitHubReleaseFileDownloader();
             var application = new Application(
                 agent,
                 store,
                 defaultModel,
                 availableModels,
                 authentication,
-                ui);
+                ui,
+                releaseFileDownloader,
+                utilityBinDirectory);
             return await application.RunAsync(args, cancellation.Token);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
