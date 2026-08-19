@@ -1,6 +1,6 @@
 # Madi architecture
 
-Source code is split into four projects. Folders and namespaces separate responsibilities inside each project without creating additional assemblies.
+Source code is split into five projects. Folders and namespaces separate responsibilities inside each project without creating additional assemblies.
 
 ## Projects
 
@@ -8,17 +8,21 @@ Source code is split into four projects. Folders and namespaces separate respons
 - `Madi.Core`: agent orchestration and stable contracts such as `IAgent`, `IModelProvider`, `ITool`, and `IWorkSessionStore`.
 - `Madi.Networking`: provider-neutral HTTP/SSE transport, including configurable endpoints, headers, compression, error handling, and SSE framing.
 - `Madi.Runtime`: concrete application integrations grouped under `Providers`, `Tools`, and `Authentication`. Providers build model requests and consume structured networking events.
+- `Madi.Services`: reusable application services, including downloading and extracting files from GitHub releases.
 
 ## Dependency direction
 
 ```text
 Madi ───────────────> Madi.Core
   ├──> Madi.Networking
+  ├──> Madi.Services
   └──> Madi.Runtime ───> Madi.Core
               └───────> Madi.Networking
 ```
 
-`Madi.Core` and `Madi.Networking` have no project dependencies. `Madi.Runtime` implements Core contracts and owns provider-specific request semantics and networking configuration, filesystem/process access, OAuth, credential persistence, and Work/Session persistence. `Madi.Networking` remains provider-neutral and owns wire-level HTTP and SSE behavior. Concrete implementations are selected only in the `Madi` composition root.
+`Madi.Core`, `Madi.Networking`, and `Madi.Services` have no project dependencies. `Madi.Runtime` implements Core contracts and owns provider-specific request semantics and networking configuration, filesystem/process access, OAuth, credential persistence, and Work/Session persistence. `Madi.Networking` remains provider-neutral and owns wire-level HTTP and SSE behavior. `Madi.Services` owns general-purpose integrations that are independent of agent runtime contracts. Concrete implementations are selected only in the `Madi` composition root.
+
+At application startup, Windows x64 builds ensure `fd.exe` and `rg.exe` exist under `MADI_HOME/bin`, or under the `bin` directory in the default local application data root. Missing utilities are installed from the matching ZIP asset in each repository's latest GitHub release. Installation failures are warnings and do not prevent the requested command from running. This shared utility directory is placed first on the Bash tool's `PATH`.
 
 Subagent definitions are read from `MADI_HOME/subagents`, or the `subagents` directory under the default local application data root. The directory is optional and read-only from Madi's perspective: no directory or definition files are created automatically. Valid definitions are exposed to the main agent through a parallel-capable delegation tool. Subagent sessions are ephemeral, use only the tools allowed by their definition, and are not persisted independently.
 Their model setting uses the `provider/name:effort` format and is resolved against both the provider and model name in the model catalog.
@@ -32,6 +36,7 @@ Madi
 Madi.UI
 Madi.Core
 Madi.Networking
+Madi.Services
 Madi.Runtime.Providers.OpenAI
 Madi.Runtime.Providers.OpenRouter
 Madi.Runtime.Tools

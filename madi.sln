@@ -10,6 +10,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Madi.Runtime", "src\Madi.Ru
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Madi.Networking", "src\Madi.Networking\Madi.Networking.csproj", "{1F193894-9EB7-4EC9-A7AA-A74BD1A48501}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Madi.Services", "src\Madi.Services\Madi.Services.csproj", "{8167D632-0B7A-47EB-A1CC-D9D9FDE263A7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Madi.Services.Tests", "tests\Madi.Services.Tests\Madi.Services.Tests.csproj", "{8B9E1BC4-4524-4072-B9E3-EA317C8DA845}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -32,6 +36,14 @@ Global
 		{1F193894-9EB7-4EC9-A7AA-A74BD1A48501}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1F193894-9EB7-4EC9-A7AA-A74BD1A48501}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1F193894-9EB7-4EC9-A7AA-A74BD1A48501}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8167D632-0B7A-47EB-A1CC-D9D9FDE263A7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8167D632-0B7A-47EB-A1CC-D9D9FDE263A7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8167D632-0B7A-47EB-A1CC-D9D9FDE263A7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8167D632-0B7A-47EB-A1CC-D9D9FDE263A7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8B9E1BC4-4524-4072-B9E3-EA317C8DA845}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8B9E1BC4-4524-4072-B9E3-EA317C8DA845}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8B9E1BC4-4524-4072-B9E3-EA317C8DA845}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8B9E1BC4-4524-4072-B9E3-EA317C8DA845}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

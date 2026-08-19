@@ -22,11 +22,18 @@ public sealed class BashTool : ITool
         """);
     private readonly string _workingDirectory;
     private readonly string? _shellPath;
+    private readonly string? _utilityBinDirectory;
 
-    public BashTool(string? workingDirectory = null, string? shellPath = null)
+    public BashTool(
+        string? workingDirectory = null,
+        string? shellPath = null,
+        string? utilityBinDirectory = null)
     {
         _workingDirectory = Path.GetFullPath(workingDirectory ?? Environment.CurrentDirectory);
         _shellPath = shellPath;
+        _utilityBinDirectory = string.IsNullOrWhiteSpace(utilityBinDirectory)
+            ? null
+            : Path.GetFullPath(utilityBinDirectory);
     }
 
     public string Name => "bash";
@@ -259,15 +266,19 @@ public sealed class BashTool : ITool
         return null;
     }
 
-    private static IEnumerable<string> GetBundledBinDirectories()
+    private IEnumerable<string> GetBundledBinDirectories()
     {
         // Environment.CurrentDirectory is the launch location in normal CLI use;
         // AppContext.BaseDirectory also supports self-contained/published layouts.
         return new[]
         {
+            _utilityBinDirectory,
             Path.Combine(Environment.CurrentDirectory, "bin"),
             Path.Combine(AppContext.BaseDirectory, "bin"),
-        }.Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        }
+        .Where(static path => !string.IsNullOrWhiteSpace(path))
+        .Select(static path => path!)
+        .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     }
 
     private static async Task CaptureAsync(StreamReader reader, StringBuilder output, object outputLock)
