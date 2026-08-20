@@ -5,25 +5,44 @@ using Madi.Core;
 
 namespace Madi.Runtime.Persistence;
 
-internal sealed record WorkDocument(
-    string Id,
-    string Title,
-    string Context)
+internal sealed record WorkDocument
 {
-    public static WorkDocument FromDomain(Work work) => new(
-        work.Id,
-        work.Title,
-        work.Context);
+    public const int CurrentSchemaVersion = 2;
 
-    public Work ToDomain()
+    public int SchemaVersion { get; init; }
+    public string Id { get; init; } = string.Empty;
+    public string Title { get; init; } = string.Empty;
+    public string Context { get; init; } = string.Empty;
+    public string? WorkingDirectory { get; init; }
+    public DateTimeOffset? CreatedAtUtc { get; init; }
+    public DateTimeOffset? UpdatedAtUtc { get; init; }
+
+    public static WorkDocument FromDomain(Work work) => new()
+    {
+        SchemaVersion = CurrentSchemaVersion,
+        Id = work.Id,
+        Title = work.Title,
+        Context = work.Context,
+        WorkingDirectory = work.WorkingDirectory,
+        CreatedAtUtc = work.CreatedAtUtc,
+        UpdatedAtUtc = work.UpdatedAtUtc,
+    };
+
+    public Work ToDomain(DateTimeOffset fallbackCreatedAtUtc, DateTimeOffset fallbackUpdatedAtUtc)
     {
         return new Work
         {
             Id = Id,
             Title = Title,
             Context = Context,
+            WorkingDirectory = NormalizeOptionalPath(WorkingDirectory),
+            CreatedAtUtc = CreatedAtUtc ?? fallbackCreatedAtUtc,
+            UpdatedAtUtc = UpdatedAtUtc ?? fallbackUpdatedAtUtc,
         };
     }
+
+    private static string? NormalizeOptionalPath(string? path) =>
+        string.IsNullOrWhiteSpace(path) ? null : Path.GetFullPath(path);
 }
 
 internal sealed record ModelDocument(
@@ -36,34 +55,51 @@ internal sealed record ModelDocument(
     public ModelOptions ToDomain() => new(Model, ReasoningEffort);
 }
 
-internal sealed record SessionDocument(
-    int SchemaVersion,
-    string Id,
-    string Title,
-    string? WorkId,
-    ModelDocument Model,
-    int MaxToolRounds,
-    string Instructions)
+internal sealed record SessionDocument
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
-    public static SessionDocument FromDomain(Session session) => new(
-        CurrentSchemaVersion,
-        session.Id,
-        session.Title,
-        session.WorkId,
-        ModelDocument.FromDomain(session.Model),
-        session.MaxToolRounds,
-        session.Instructions);
+    public int SchemaVersion { get; init; }
+    public string Id { get; init; } = string.Empty;
+    public string Title { get; init; } = string.Empty;
+    public string? WorkId { get; init; }
+    public string? WorkingDirectory { get; init; }
+    public DateTimeOffset? CreatedAtUtc { get; init; }
+    public DateTimeOffset? UpdatedAtUtc { get; init; }
+    public ModelDocument? Model { get; init; }
+    public int MaxToolRounds { get; init; }
+    public string Instructions { get; init; } = string.Empty;
 
-    public Session ToDomain()
+    public static SessionDocument FromDomain(Session session) => new()
+    {
+        SchemaVersion = CurrentSchemaVersion,
+        Id = session.Id,
+        Title = session.Title,
+        WorkId = session.WorkId,
+        WorkingDirectory = session.WorkingDirectory,
+        CreatedAtUtc = session.CreatedAtUtc,
+        UpdatedAtUtc = session.UpdatedAtUtc,
+        Model = ModelDocument.FromDomain(session.Model),
+        MaxToolRounds = session.MaxToolRounds,
+        Instructions = session.Instructions,
+    };
+
+    public Session ToDomain(
+        DateTimeOffset fallbackCreatedAtUtc,
+        DateTimeOffset fallbackUpdatedAtUtc)
     {
         return new Session
         {
             Id = Id,
             Title = Title,
             WorkId = WorkId,
-            Model = Model.ToDomain(),
+            WorkingDirectory = string.IsNullOrWhiteSpace(WorkingDirectory)
+                ? null
+                : Path.GetFullPath(WorkingDirectory),
+            CreatedAtUtc = CreatedAtUtc ?? fallbackCreatedAtUtc,
+            UpdatedAtUtc = UpdatedAtUtc ?? fallbackUpdatedAtUtc,
+            Model = Model?.ToDomain()
+                ?? throw new InvalidDataException($"Session '{Id}' has no model metadata."),
             MaxToolRounds = MaxToolRounds,
             Instructions = Instructions,
         };
@@ -84,6 +120,7 @@ internal sealed record ConversationItemDocument
     public string? Name { get; init; }
     public string? Arguments { get; init; }
     public string? Output { get; init; }
+    public bool? IsError { get; init; }
     public string? OutputType { get; init; }
     public string? RawJson { get; init; }
 
@@ -108,6 +145,7 @@ internal sealed record ConversationItemDocument
                 Type = "tool_result",
                 CallId = result.CallId,
                 Output = result.Output,
+                IsError = result.IsError,
             },
             ModelAssistantOutput output => new()
             {
@@ -145,7 +183,10 @@ internal sealed record ConversationItemDocument
         "assistant_message" => new AssistantMessage(Require(Text, nameof(Text))),
         "tool_result" => new ToolResult(
             Require(CallId, nameof(CallId)),
-            Require(Output, nameof(Output))),
+            Require(Output, nameof(Output)),
+            IsError ?? Require(Output, nameof(Output)).StartsWith(
+                "Error:",
+                StringComparison.OrdinalIgnoreCase)),
         "model_assistant_output" => new ModelAssistantOutput(
             Require(ProviderId, nameof(ProviderId)),
             Require(Text, nameof(Text)),
@@ -183,5 +224,7 @@ internal sealed partial class PersistenceJsonContext : JsonSerializerContext
         new JsonSerializerOptions
         {
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true,
         });
 }

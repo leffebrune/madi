@@ -16,7 +16,10 @@ public sealed record UserMessage(string Text) : ModelInputItem;
 
 public sealed record AssistantMessage(string Text) : ModelInputItem;
 
-public sealed record ToolResult(string CallId, string Output) : ModelInputItem;
+public sealed record ToolResult(
+    string CallId,
+    string Output,
+    bool IsError = false) : ModelInputItem;
 
 /// <summary>
 /// A completed provider output item. RawJson is intentionally opaque to Core and can be

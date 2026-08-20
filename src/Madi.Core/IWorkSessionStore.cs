@@ -13,6 +13,10 @@ public interface IWorkSessionStore
     Task<CurrentConversation?> LoadCurrentAsync(
         CancellationToken cancellationToken = default);
 
+    Task<CurrentConversation?> LoadConversationAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default);
+
     Task SaveWorkAsync(
         Work work,
         CancellationToken cancellationToken = default);
@@ -24,6 +28,10 @@ public interface IWorkSessionStore
     Task AppendConversationAsync(
         Session session,
         int startIndex,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> DeleteSessionAsync(
+        string sessionId,
         CancellationToken cancellationToken = default);
 
     Task SetCurrentAsync(
