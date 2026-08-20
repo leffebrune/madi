@@ -159,6 +159,7 @@ public sealed class Agent : IAgent
                         yield return new AgentToolExecutionCompleted(
                             execution.Call.CallId,
                             execution.Call.Name,
+                            result.Output,
                             result.IsError);
                     }
                 }
@@ -199,6 +200,7 @@ public sealed class Agent : IAgent
                         yield return new AgentToolExecutionCompleted(
                             toolCall.CallId,
                             toolCall.Name,
+                            result.Output,
                             result.IsError);
                     }
                 }

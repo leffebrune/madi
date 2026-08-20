@@ -342,12 +342,10 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
             FileShare.ReadWrite);
         using var reader = new StreamReader(stream, Utf8WithoutBom);
 
-        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+        var line = await ReadNextNonEmptyLineAsync(reader, cancellationToken);
+        while (line is not null)
         {
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                continue;
-            }
+            var nextLine = await ReadNextNonEmptyLineAsync(reader, cancellationToken);
 
             ConversationItemDocument item;
             try
@@ -358,7 +356,7 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
                     ?? throw new InvalidDataException(
                         $"Conversation item in '{conversationPath}' is null.");
             }
-            catch (JsonException) when (reader.EndOfStream)
+            catch (JsonException) when (nextLine is null)
             {
                 // A process may have stopped while appending the last record.
                 break;
@@ -372,9 +370,25 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
             }
 
             session.Conversation.Add(item.ToDomain());
+            line = nextLine;
         }
 
         return session;
+    }
+
+    private static async Task<string?> ReadNextNonEmptyLineAsync(
+        StreamReader reader,
+        CancellationToken cancellationToken)
+    {
+        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+        {
+            if (!string.IsNullOrWhiteSpace(line))
+            {
+                return line;
+            }
+        }
+
+        return null;
     }
 
     private static async Task<int> CountConversationItemsUnlockedAsync(

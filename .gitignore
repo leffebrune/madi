@@ -12,6 +12,7 @@
 [Rr]elease/
 
 # .NET tooling
+.dotnet/
 project.lock.json
 project.fragment.lock.json
 artifacts/
