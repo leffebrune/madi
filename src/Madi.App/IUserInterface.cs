@@ -1,8 +1,5 @@
-namespace Madi.UI;
+namespace Madi.App;
 
-/// <summary>
-/// Output boundary used by the application independently of a concrete UI framework.
-/// </summary>
 public interface IUserInterface
 {
     Task<string?> ReadLineAsync(CancellationToken cancellationToken = default);

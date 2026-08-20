@@ -16,6 +16,7 @@ public sealed record AgentToolCallCompleted(
 public sealed record AgentToolExecutionCompleted(
     string CallId,
     string Name,
+    string Result,
     bool IsError) : AgentEvent;
 
 public sealed record AgentSubagentStarted(

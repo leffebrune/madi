@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Madi.Core\Madi.Core.csproj" />
+    <ProjectReference Include="..\Madi.Networking\Madi.Networking.csproj" />
+    <ProjectReference Include="..\Madi.Runtime\Madi.Runtime.csproj" />
+    <ProjectReference Include="..\Madi.Services\Madi.Services.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,3 +1,5 @@
+using Madi.App;
+
 namespace Madi.UI;
 
 /// <summary>
