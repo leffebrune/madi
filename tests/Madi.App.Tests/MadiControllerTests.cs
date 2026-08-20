@@ -179,6 +179,131 @@ public sealed class MadiControllerTests
         Assert.DoesNotContain("hello", usage, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task TypedActionsUseTheSameModelSelectionBehaviorAsCommands()
+    {
+        var commandController = CreateController();
+        var actionController = CreateController();
+
+        var commandEvents = await CollectAsync(commandController.ExecuteAsync("/model second"));
+        var actionEvents = await CollectAsync(
+            actionController.ExecuteAsync(new SelectModelAction("second")));
+
+        Assert.Equal("second", commandController.State.Model.Model);
+        Assert.Equal(commandController.State.Model, actionController.State.Model);
+        Assert.Equal(
+            commandEvents.OfType<AppTurnCompleted>().Last(),
+            actionEvents.OfType<AppTurnCompleted>().Last());
+    }
+
+    [Fact]
+    public async Task NavigationIsWorkspaceScopedSortedAndActivatesConversation()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var older = Session("older", "이전", "work-1", "C:\\work", now.AddMinutes(-2));
+        var recent = Session("recent", "최근", "work-1", "C:\\work", now);
+        recent.Model = new ModelOptions("second");
+        recent.Conversation.Add(new UserMessage("복원 질문"));
+        var other = Session("other", "다른 폴더", null, "C:\\other", now.AddMinutes(1));
+        var standalone = Session("standalone", "독립", null, "C:\\work", now.AddMinutes(-1));
+        var legacy = Session("legacy", "기존", null, null, now.AddMinutes(-3));
+        var work = new Work
+        {
+            Id = "work-1",
+            Title = "작업",
+            WorkingDirectory = "C:\\work",
+            CreatedAtUtc = older.CreatedAtUtc,
+            UpdatedAtUtc = now,
+        };
+        work.Sessions.Add(older);
+        work.Sessions.Add(recent);
+        var store = new RecordingStore();
+        store.Works.Add(work);
+        store.Sessions.AddRange([older, recent, other, standalone, legacy]);
+        var controller = CreateController(store: store);
+
+        var navigation = await controller.GetNavigationAsync();
+        var events = await CollectAsync(controller.ExecuteAsync(new ActivateSessionAction("recent")));
+
+        Assert.Equal(["recent", "older"], navigation.Works[0].Sessions.Select(item => item.Id));
+        Assert.Equal("standalone", Assert.Single(navigation.StandaloneSessions).Id);
+        Assert.Equal(1, navigation.LegacyItemCount);
+        Assert.Equal("second", controller.State.Model.Model);
+        var loaded = Assert.Single(events.OfType<AppConversationLoaded>());
+        Assert.Equal("복원 질문", Assert.Single(loaded.Conversation.Entries).Summary);
+    }
+
+    [Fact]
+    public async Task DeletingCurrentSessionSelectsNewestReplacementThenClearsLastConversation()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var older = Session("older", "이전", "work-1", "C:\\work", now.AddMinutes(-1));
+        var current = Session("current", "현재", "work-1", "C:\\work", now);
+        var work = new Work
+        {
+            Id = "work-1",
+            Title = "작업",
+            WorkingDirectory = "C:\\work",
+            CreatedAtUtc = now.AddMinutes(-2),
+            UpdatedAtUtc = now,
+        };
+        work.Sessions.AddRange([older, current]);
+        var store = new RecordingStore
+        {
+            Current = new CurrentConversation(work, current),
+        };
+        store.Works.Add(work);
+        store.Sessions.AddRange([older, current]);
+        var controller = CreateController(store: store);
+
+        var replaced = await CollectAsync(
+            controller.ExecuteAsync(new DeleteSessionAction(current.Id)));
+
+        Assert.Equal(older.Id, controller.State.Session?.Id);
+        Assert.Equal(older.Id, Assert.Single(replaced.OfType<AppConversationLoaded>()).Conversation.Session.Id);
+        Assert.DoesNotContain(store.Sessions, item => item.Id == current.Id);
+
+        var cleared = await CollectAsync(
+            controller.ExecuteAsync(new DeleteSessionAction(older.Id)));
+
+        Assert.Null(controller.State.Session);
+        Assert.Null(controller.State.Work);
+        Assert.Single(cleared.OfType<AppConversationCleared>());
+        Assert.Empty(store.Sessions);
+        Assert.Empty((await controller.GetNavigationAsync()).Works[0].Sessions);
+    }
+
+    [Fact]
+    public async Task DeleteSessionRejectsAConversationFromAnotherWorkspace()
+    {
+        var session = Session("other", "다른 폴더", null, "C:\\other", DateTimeOffset.UtcNow);
+        var store = new RecordingStore();
+        store.Sessions.Add(session);
+        var controller = CreateController(store: store);
+
+        var events = await CollectAsync(
+            controller.ExecuteAsync(new DeleteSessionAction(session.Id)));
+
+        Assert.Contains(events, item => item is AppTurnCompleted { Succeeded: false });
+        Assert.Contains(store.Sessions, item => item.Id == session.Id);
+    }
+
+    private static Session Session(
+        string id,
+        string title,
+        string? workId,
+        string? workingDirectory,
+        DateTimeOffset updatedAt) => new()
+        {
+            Id = id,
+            Title = title,
+            WorkId = workId,
+            WorkingDirectory = workingDirectory,
+            CreatedAtUtc = updatedAt.AddMinutes(-1),
+            UpdatedAtUtc = updatedAt,
+            Model = new ModelOptions("first"),
+        };
+
     private static MadiController CreateController(
         IAgent? agent = null,
         RecordingStore? store = null,
@@ -235,18 +360,36 @@ public sealed class MadiControllerTests
         public Session? LastSavedSession { get; private set; }
         public List<int> AppendStartIndices { get; } = [];
         public int SetCurrentCount { get; private set; }
+        public List<Work> Works { get; } = [];
+        public List<Session> Sessions { get; } = [];
 
         public Task<IReadOnlyList<Work>> LoadWorksAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<Work>>([]);
+            Task.FromResult<IReadOnlyList<Work>>(Works);
         public Task<IReadOnlyList<Session>> LoadSessionsAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<Session>>([]);
+            Task.FromResult<IReadOnlyList<Session>>(Sessions);
         public Task<CurrentConversation?> LoadCurrentAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(Current);
-        public Task SaveWorkAsync(Work work, CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
+        public Task<CurrentConversation?> LoadConversationAsync(
+            string sessionId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Current?.Session.Id == sessionId
+                ? Current
+                : Sessions.FirstOrDefault(item => item.Id == sessionId) is { } session
+                    ? new CurrentConversation(
+                        Works.FirstOrDefault(item => item.Id == session.WorkId),
+                        session)
+                    : null);
+        public Task SaveWorkAsync(Work work, CancellationToken cancellationToken = default)
+        {
+            Works.RemoveAll(item => item.Id == work.Id);
+            Works.Add(work);
+            return Task.CompletedTask;
+        }
         public Task SaveSessionAsync(Session session, CancellationToken cancellationToken = default)
         {
             LastSavedSession = session;
+            Sessions.RemoveAll(item => item.Id == session.Id);
+            Sessions.Add(session);
             return Task.CompletedTask;
         }
         public Task AppendConversationAsync(
@@ -257,9 +400,27 @@ public sealed class MadiControllerTests
             AppendStartIndices.Add(startIndex);
             return Task.CompletedTask;
         }
+        public Task<bool> DeleteSessionAsync(
+            string sessionId,
+            CancellationToken cancellationToken = default)
+        {
+            var removed = Sessions.RemoveAll(item => item.Id == sessionId) > 0;
+            foreach (var work in Works)
+            {
+                work.Sessions.RemoveAll(item => item.Id == sessionId);
+            }
+            if (Current?.Session.Id == sessionId)
+            {
+                Current = null;
+            }
+            return Task.FromResult(removed);
+        }
         public Task SetCurrentAsync(Session session, CancellationToken cancellationToken = default)
         {
             SetCurrentCount++;
+            Current = new CurrentConversation(
+                Works.FirstOrDefault(item => item.Id == session.WorkId),
+                session);
             return Task.CompletedTask;
         }
     }

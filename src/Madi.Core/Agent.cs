@@ -168,7 +168,8 @@ public sealed class Agent : IAgent
                 {
                     pendingConversation.Add(new ToolResult(
                         toolCalls[index].CallId,
-                        results[index].Output));
+                        results[index].Output,
+                        results[index].IsError));
                 }
             }
             else
@@ -186,7 +187,10 @@ public sealed class Agent : IAgent
                     }
 
                     var result = await ExecuteToolAsync(toolCall, cancellationToken);
-                    pendingConversation.Add(new ToolResult(toolCall.CallId, result.Output));
+                    pendingConversation.Add(new ToolResult(
+                        toolCall.CallId,
+                        result.Output,
+                        result.IsError));
                     if (subagentName is not null)
                     {
                         yield return new AgentSubagentCompleted(

@@ -106,12 +106,49 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
         }
     }
 
+    public async Task<CurrentConversation?> LoadConversationAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateId(sessionId, nameof(sessionId));
+
+        await FileLock.WaitAsync(cancellationToken);
+        try
+        {
+            var session = await LoadSessionUnlockedAsync(sessionId, cancellationToken);
+            if (session is null)
+            {
+                return null;
+            }
+
+            Work? work = null;
+            if (session.WorkId is not null)
+            {
+                work = await LoadWorkUnlockedAsync(session.WorkId, cancellationToken)
+                    ?? throw new InvalidDataException(
+                        $"Session '{session.Id}' references missing work '{session.WorkId}'.");
+                work.Sessions.Add(session);
+            }
+
+            return new CurrentConversation(work, session);
+        }
+        finally
+        {
+            FileLock.Release();
+        }
+    }
+
     public async Task SaveWorkAsync(
         Work work,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(work);
         ValidateId(work.Id, nameof(work));
+        ValidateOptionalWorkingDirectory(work.WorkingDirectory, nameof(work));
+        if (work.WorkingDirectory is not null)
+        {
+            work.WorkingDirectory = Path.GetFullPath(work.WorkingDirectory);
+        }
 
         await FileLock.WaitAsync(cancellationToken);
         try
@@ -135,6 +172,10 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
     {
         ArgumentNullException.ThrowIfNull(session);
         ValidateSession(session);
+        if (session.WorkingDirectory is not null)
+        {
+            session.WorkingDirectory = Path.GetFullPath(session.WorkingDirectory);
+        }
 
         await FileLock.WaitAsync(cancellationToken);
         try
@@ -143,6 +184,19 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
             {
                 throw new InvalidDataException(
                     $"Session '{session.Id}' references missing work '{session.WorkId}'.");
+            }
+
+
+            if (session.WorkId is not null)
+            {
+                var work = await LoadWorkUnlockedAsync(session.WorkId, cancellationToken);
+                if (work?.WorkingDirectory is not null
+                    && session.WorkingDirectory is not null
+                    && !PathsEqual(work.WorkingDirectory, session.WorkingDirectory))
+                {
+                    throw new InvalidDataException(
+                        $"Session '{session.Id}' and work '{work.Id}' belong to different working directories.");
+                }
             }
 
             var path = GetSessionMetadataPath(session.Id);
@@ -229,6 +283,49 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
         }
     }
 
+    public async Task<bool> DeleteSessionAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateId(sessionId, nameof(sessionId));
+
+        await FileLock.WaitAsync(cancellationToken);
+        try
+        {
+            var sessionPath = Path.Combine(_sessionsPath, sessionId);
+            if (!Directory.Exists(sessionPath))
+            {
+                return false;
+            }
+
+            var clearsCurrent = false;
+            if (File.Exists(_currentPath))
+            {
+                var current = await ReadJsonAsync(
+                    _currentPath,
+                    PersistenceJsonContext.Relaxed.CurrentDocument,
+                    cancellationToken);
+                clearsCurrent = string.Equals(
+                    current.SessionId,
+                    sessionId,
+                    StringComparison.Ordinal);
+            }
+
+            // Clear the pointer first so it cannot reference a session after deletion.
+            if (clearsCurrent)
+            {
+                File.Delete(_currentPath);
+            }
+            Directory.Delete(sessionPath, recursive: true);
+
+            return true;
+        }
+        finally
+        {
+            FileLock.Release();
+        }
+    }
+
     public async Task SetCurrentAsync(
         Session session,
         CancellationToken cancellationToken = default)
@@ -266,7 +363,9 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
                 path,
                 PersistenceJsonContext.Relaxed.WorkDocument,
                 cancellationToken);
-            works.Add(document.ToDomain());
+            works.Add(document.ToDomain(
+                File.GetCreationTimeUtc(path),
+                File.GetLastWriteTimeUtc(path)));
         }
 
         return works;
@@ -309,7 +408,9 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
             path,
             PersistenceJsonContext.Relaxed.WorkDocument,
             cancellationToken);
-        return document.ToDomain();
+        return document.ToDomain(
+            File.GetCreationTimeUtc(path),
+            File.GetLastWriteTimeUtc(path));
     }
 
     private async Task<Session?> LoadSessionUnlockedAsync(
@@ -327,7 +428,9 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
             metadataPath,
             PersistenceJsonContext.Relaxed.SessionDocument,
             cancellationToken);
-        var session = document.ToDomain();
+        var session = document.ToDomain(
+            File.GetCreationTimeUtc(metadataPath),
+            File.GetLastWriteTimeUtc(metadataPath));
 
         var conversationPath = GetConversationPath(sessionId);
         if (!File.Exists(conversationPath))
@@ -498,7 +601,31 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
         {
             throw new ArgumentException("Session instructions are required.", nameof(session));
         }
+
+
+        ValidateOptionalWorkingDirectory(session.WorkingDirectory, nameof(session));
     }
+
+    private static void ValidateOptionalWorkingDirectory(string? path, string parameterName)
+    {
+        if (path is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
+        {
+            throw new ArgumentException(
+                "Working directory must be an absolute path when supplied.",
+                parameterName);
+        }
+    }
+
+    private static bool PathsEqual(string left, string right) =>
+        string.Equals(
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
+            StringComparison.OrdinalIgnoreCase);
 
     private static void ValidateId(string id, string parameterName)
     {

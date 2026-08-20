@@ -59,6 +59,12 @@ public sealed record AppAuthenticationProgress(
 
 public sealed record AppStateChanged(AppState State) : AppEvent;
 
+public sealed record AppNavigationChanged(NavigationSnapshot Navigation) : AppEvent;
+
+public sealed record AppConversationLoaded(ConversationSnapshot Conversation) : AppEvent;
+
+public sealed record AppConversationCleared : AppEvent;
+
 public sealed record AppTurnCompleted(bool Succeeded, bool Canceled = false) : AppEvent;
 
 public sealed record AppExitRequested : AppEvent;

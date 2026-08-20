@@ -20,15 +20,7 @@ public static class MadiAppFactory
         string? workingDirectory = null,
         CancellationToken cancellationToken = default)
     {
-        storageRoot ??= Environment.GetEnvironmentVariable("MADI_HOME");
-        if (string.IsNullOrWhiteSpace(storageRoot))
-        {
-            storageRoot = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "madi");
-        }
-
-        storageRoot = Path.GetFullPath(storageRoot);
+        storageRoot = ResolveStorageRoot(storageRoot);
         workingDirectory = Path.GetFullPath(workingDirectory ?? Environment.CurrentDirectory);
         var utilityBinDirectory = Path.Combine(storageRoot, "bin");
 
@@ -72,5 +64,18 @@ public static class MadiAppFactory
             new GitHubReleaseFileDownloader(),
             utilityBinDirectory);
         return new MadiAppHost(controller, utilityInstaller);
+    }
+
+    public static string ResolveStorageRoot(string? storageRoot = null)
+    {
+        storageRoot ??= Environment.GetEnvironmentVariable("MADI_HOME");
+        if (string.IsNullOrWhiteSpace(storageRoot))
+        {
+            storageRoot = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "madi");
+        }
+
+        return Path.GetFullPath(storageRoot);
     }
 }
