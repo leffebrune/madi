@@ -1,14 +1,12 @@
 using System.Collections.ObjectModel;
 using Madi.App;
 using Madi.GUI.Presentation;
-using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Storage.Pickers;
 using Windows.System;
-using Windows.UI.Core;
 
 namespace Madi.GUI;
 
@@ -334,7 +332,7 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private async void OnPromptKeyDown(object sender, KeyRoutedEventArgs e)
+    private void OnPromptKeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (_viewModel is null)
         {
@@ -356,13 +354,19 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        if (e.Key == VirtualKey.Enter && IsModifierDown(VirtualKey.Control)
-                                     && !IsModifierDown(VirtualKey.Shift)
-                                     && !IsModifierDown(VirtualKey.Menu))
+    }
+
+    private async void OnPromptSendAcceleratorInvoked(
+        KeyboardAccelerator sender,
+        KeyboardAcceleratorInvokedEventArgs e)
+    {
+        if (_viewModel is null)
         {
-            e.Handled = true;
-            await _viewModel.SendOrCancelAsync();
+            return;
         }
+
+        e.Handled = true;
+        await _viewModel.SendOrCancelAsync();
     }
 
     private void OnSuggestionDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
@@ -404,9 +408,6 @@ public sealed partial class MainPage : Page
         WorkspaceError.Message = message;
         WorkspaceError.IsOpen = true;
     }
-
-    private static bool IsModifierDown(VirtualKey key) =>
-        InputKeyboardSource.GetKeyStateForCurrentThread(key).HasFlag(CoreVirtualKeyStates.Down);
 
     private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
     {
