@@ -16,7 +16,7 @@ public enum AuthenticationState
     SignedIn,
 }
 
-public sealed record WorkSnapshot(string Id, string Title);
+public sealed record WorkSnapshot(string Id, string Title, string Prompt);
 
 public sealed record SessionSnapshot(string Id, string Title, string? WorkId);
 

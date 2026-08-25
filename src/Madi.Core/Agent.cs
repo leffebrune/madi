@@ -60,9 +60,10 @@ public sealed class Agent : IAgent
                     pendingConversation,
                     _tools,
                     session.Model,
-                    BuildInstructions(work, session),
+                    session.Instructions,
                     session.Id,
-                    _tools.Any(static tool => tool.SupportsParallelExecution)),
+                    _tools.Any(static tool => tool.SupportsParallelExecution),
+                    GetWorkInstructions(work)),
                 cancellationToken))
             {
                 switch (item)
@@ -233,15 +234,8 @@ public sealed class Agent : IAgent
         }
     }
 
-    private static string BuildInstructions(Work? work, Session session)
-    {
-        if (work is null || string.IsNullOrWhiteSpace(work.Context))
-        {
-            return session.Instructions;
-        }
-
-        return $"{session.Instructions}\n\nWork context:\n{work.Context}";
-    }
+    private static string? GetWorkInstructions(Work? work) =>
+        string.IsNullOrWhiteSpace(work?.Context) ? null : work.Context.Trim();
 
     private async Task<ToolExecutionResult> ExecuteToolAsync(
         ModelToolCall call,

@@ -308,6 +308,53 @@ public sealed partial class MainPage : Page
         }
     }
 
+    private async void OnEditWorkPrompt(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null || !_viewModel.HasCurrentWork)
+        {
+            return;
+        }
+
+        var input = new TextBox
+        {
+            Text = _viewModel.CurrentWorkPrompt,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            MinWidth = 560,
+            MinHeight = 280,
+            MaxHeight = 520,
+            PlaceholderText = "이 Work의 장기 목표, 제약 사항, 작업 원칙 등을 입력하세요.",
+        };
+        var content = new StackPanel
+        {
+            Spacing = 10,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = "이 프롬프트는 Work의 모든 대화에서 시스템 지침 다음, 대화 내용 전에 자동으로 적용됩니다.",
+                    TextWrapping = TextWrapping.Wrap,
+                    Opacity = 0.75,
+                },
+                input,
+            },
+        };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "Work 프롬프트 편집",
+            Content = content,
+            PrimaryButtonText = "저장",
+            CloseButtonText = "취소",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            await _viewModel.UpdateWorkPromptAsync(input.Text);
+        }
+    }
+
     private async void OnModelSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_viewModel is not null && ModelSelector.SelectedValue is string model)

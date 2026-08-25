@@ -143,6 +143,7 @@
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="240" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
@@ -152,7 +153,14 @@
                             <TextBlock Text="{Binding WorkingDirectory}" FontSize="12" Opacity="0.65"
                                        TextTrimming="CharacterEllipsis" />
                         </StackPanel>
-                        <ComboBox x:Name="ModelSelector" Grid.Column="1"
+                        <Button Grid.Column="1"
+                                Content="Work 프롬프트"
+                                Click="OnEditWorkPrompt"
+                                IsEnabled="{Binding CanInteract}"
+                                Visibility="{Binding HasCurrentWork, Converter={StaticResource BoolToVisibility}}"
+                                VerticalAlignment="Bottom"
+                                AutomationProperties.Name="Work 프롬프트 편집" />
+                        <ComboBox x:Name="ModelSelector" Grid.Column="2"
                                   ItemsSource="{Binding Models}"
                                   DisplayMemberPath="Name"
                                   SelectedValuePath="Name"
@@ -161,7 +169,7 @@
                                   IsEnabled="{Binding CanInteract}"
                                   Header="모델"
                                   AutomationProperties.Name="모델 선택" />
-                        <Button Grid.Column="2"
+                        <Button Grid.Column="3"
                                 Content="{Binding AuthenticationLabel}"
                                 Click="OnToggleAuthentication"
                                 IsEnabled="{Binding CanInteract}"
