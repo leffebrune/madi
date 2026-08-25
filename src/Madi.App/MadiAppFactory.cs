@@ -33,6 +33,8 @@ public static class MadiAppFactory
         var availableModels = await modelCatalog.LoadAsync(cancellationToken);
         ISubagentCatalog subagentCatalog = new FileSubagentCatalog(storageRoot);
         var subagentDefinitions = await subagentCatalog.LoadAsync(cancellationToken);
+        ISystemPromptCatalog systemPromptCatalog = new FileSystemPromptCatalog(storageRoot);
+        var defaultInstructions = await systemPromptCatalog.LoadAsync(cancellationToken);
 
         var tools = new ToolCatalog(
             workingDirectory,
@@ -59,6 +61,7 @@ public static class MadiAppFactory
             defaultModel,
             availableModels,
             authentication,
+            defaultInstructions,
             workingDirectory);
         var utilityInstaller = new UtilityInstaller(
             new GitHubReleaseFileDownloader(),

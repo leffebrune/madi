@@ -11,6 +11,7 @@ public sealed class MadiController
     private readonly IOAuthAuthentication _authentication;
     private readonly IReadOnlyList<AvailableModel> _availableModels;
     private readonly string _workingDirectory;
+    private readonly string _defaultInstructions;
     private ModelOptions _selectedModel;
     private Work? _currentWork;
     private Session? _currentSession;
@@ -25,6 +26,7 @@ public sealed class MadiController
         ModelOptions defaultModel,
         IReadOnlyList<AvailableModel> availableModels,
         IOAuthAuthentication authentication,
+        string defaultInstructions,
         string? workingDirectory = null)
     {
         _agent = agent ?? throw new ArgumentNullException(nameof(agent));
@@ -32,6 +34,8 @@ public sealed class MadiController
         _selectedModel = defaultModel ?? throw new ArgumentNullException(nameof(defaultModel));
         _availableModels = availableModels ?? throw new ArgumentNullException(nameof(availableModels));
         _authentication = authentication ?? throw new ArgumentNullException(nameof(authentication));
+        ArgumentException.ThrowIfNullOrWhiteSpace(defaultInstructions);
+        _defaultInstructions = defaultInstructions;
         _workingDirectory = Path.GetFullPath(workingDirectory ?? Environment.CurrentDirectory);
         Commands = CreateCommandCatalog();
     }
@@ -868,6 +872,7 @@ public sealed class MadiController
         CreatedAtUtc = DateTimeOffset.UtcNow,
         UpdatedAtUtc = DateTimeOffset.UtcNow,
         Model = _selectedModel,
+        Instructions = _defaultInstructions,
     };
 
     private async Task<NavigationSnapshot> CreateNavigationSnapshotAsync(

@@ -77,6 +77,7 @@ public sealed class TimelineViewModelTests
                 MaxContextTokens = 1000,
             }],
             new StubAuthentication(),
+            "Helpful assistant.",
             "C:\\work");
         return new MainViewModel(controller, new ImmediateUiDispatcher());
     }

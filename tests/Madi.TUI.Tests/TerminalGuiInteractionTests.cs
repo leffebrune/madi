@@ -141,6 +141,7 @@ public sealed class TerminalGuiInteractionTests
                 },
             ],
             new Authentication(),
+            "Helpful assistant.",
             path),
         new UtilityInstaller(new NoOpDownloader(), path));
 
