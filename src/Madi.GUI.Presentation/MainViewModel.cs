@@ -9,6 +9,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 {
     private readonly MadiController _controller;
     private readonly IUiDispatcher _dispatcher;
+    private readonly IActivityDescriptionFormatter _activityDescriptionFormatter;
     private CancellationTokenSource? _operationCancellation;
     private string _draft = string.Empty;
     private string _headerTitle = "새 대화";
@@ -25,10 +26,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private bool _followLatest = true;
     private string? _submittedDraft;
 
-    public MainViewModel(MadiController controller, IUiDispatcher dispatcher)
+    public MainViewModel(
+        MadiController controller,
+        IUiDispatcher dispatcher,
+        IActivityDescriptionFormatter? activityDescriptionFormatter = null)
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
+        _activityDescriptionFormatter = activityDescriptionFormatter ?? new ActivityDescriptionFormatter();
         _workingDirectory = controller.State.WorkingDirectory;
         foreach (var model in controller.AvailableModels)
         {
@@ -352,7 +357,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                     tool.Name,
                     $"### 인자\n```json\n{tool.Arguments}\n```",
                     tool.CallId,
-                    isRunning: true));
+                    isRunning: true,
+                    description: _activityDescriptionFormatter.FormatTool(tool.Name, tool.Arguments)));
                 break;
             case AppToolCompleted tool:
                 CompleteActivity(
@@ -367,7 +373,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                     subagent.Name,
                     $"### 프롬프트\n{subagent.Prompt}",
                     subagent.CallId,
-                    isRunning: true));
+                    isRunning: true,
+                    description: _activityDescriptionFormatter.FormatSubagent(
+                        subagent.Name,
+                        subagent.Prompt)));
                 break;
             case AppSubagentCompleted subagent:
                 CompleteActivity(
@@ -497,14 +506,28 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                     ConversationEntryKind.Subagent => TimelineItemKind.Subagent,
                     _ => TimelineItemKind.Information,
                 },
-                entry.Summary,
+                entry.ActivityName ?? entry.Summary,
                 entry.Details,
                 entry.ActivityId,
-                isError: entry.IsError));
+                isError: entry.IsError,
+                description: GetActivityDescription(entry)));
         }
         HeaderTitle = conversation.Session.Title;
         TimelineChanged?.Invoke(this, EventArgs.Empty);
     }
+
+    private string? GetActivityDescription(ConversationEntrySnapshot entry) => entry.Kind switch
+    {
+        ConversationEntryKind.Tool when entry.ActivityInput is not null =>
+            _activityDescriptionFormatter.FormatTool(
+                entry.ActivityName ?? entry.Summary,
+                entry.ActivityInput),
+        ConversationEntryKind.Subagent when entry.ActivityInput is not null =>
+            _activityDescriptionFormatter.FormatSubagent(
+                entry.ActivityName ?? entry.Summary,
+                entry.ActivityInput),
+        _ => null,
+    };
 
     private void CompleteActivity(string callId, string text, string details, bool isError)
     {

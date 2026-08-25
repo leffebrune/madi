@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage.Pickers;
 using Windows.System;
 
@@ -205,6 +206,71 @@ public sealed partial class MainPage : Page
         }
     }
 
+    private void OnCopyAssistantMarkdown(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button
+            {
+                DataContext: TimelineItemViewModel
+                {
+                    Kind: TimelineItemKind.Assistant,
+                    Text: var markdown,
+                },
+            })
+        {
+            return;
+        }
+
+        var package = new DataPackage();
+        package.SetText(markdown);
+        Clipboard.SetContent(package);
+    }
+
+    private void OnToggleActivityDetails(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button
+            {
+                DataContext: TimelineItemViewModel { IsActivity: true } activity,
+            })
+        {
+            activity.IsActivityExpanded = !activity.IsActivityExpanded;
+        }
+    }
+
+    private void OnTimelinePreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (_timelineScroller is null)
+        {
+            return;
+        }
+
+        const double lineScrollAmount = 48;
+        var pageScrollAmount = Math.Max(
+            lineScrollAmount,
+            _timelineScroller.ViewportHeight - lineScrollAmount);
+        var targetOffset = e.Key switch
+        {
+            VirtualKey.Up => _timelineScroller.VerticalOffset - lineScrollAmount,
+            VirtualKey.Down => _timelineScroller.VerticalOffset + lineScrollAmount,
+            VirtualKey.PageUp => _timelineScroller.VerticalOffset - pageScrollAmount,
+            VirtualKey.PageDown => _timelineScroller.VerticalOffset + pageScrollAmount,
+            VirtualKey.Home => 0,
+            VirtualKey.End => _timelineScroller.ScrollableHeight,
+            _ => double.NaN,
+        };
+        if (double.IsNaN(targetOffset))
+        {
+            return;
+        }
+
+        targetOffset = Math.Clamp(targetOffset, 0, _timelineScroller.ScrollableHeight);
+        _timelineScroller.ChangeView(
+            horizontalOffset: null,
+            verticalOffset: targetOffset,
+            zoomFactor: null,
+            disableAnimation: false);
+        e.Handled = true;
+    }
+
     private async void OnNavigationItemClick(object sender, ItemClickEventArgs e)
     {
         if (_viewModel is not null
@@ -272,11 +338,47 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private async void OnNewSession(object sender, RoutedEventArgs e)
+    private void OnNewSessionMenu(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null || sender is not Button button)
+        {
+            return;
+        }
+
+        var menu = new MenuFlyout();
+        if (_viewModel.HasCurrentWork)
+        {
+            var currentWorkItem = new MenuFlyoutItem
+            {
+                Text = "현재 Work에 새 대화",
+            };
+            currentWorkItem.Click += OnNewSessionInCurrentWork;
+            menu.Items.Add(currentWorkItem);
+        }
+
+        var standaloneItem = new MenuFlyoutItem
+        {
+            Text = "독립 대화",
+        };
+        standaloneItem.Click += OnNewStandaloneSession;
+        menu.Items.Add(standaloneItem);
+        menu.ShowAt(button);
+    }
+
+    private async void OnNewSessionInCurrentWork(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel?.CurrentWorkId is { } workId)
+        {
+            await _viewModel.CreateSessionAsync(workId);
+            PromptBox.Focus(FocusState.Programmatic);
+        }
+    }
+
+    private async void OnNewStandaloneSession(object sender, RoutedEventArgs e)
     {
         if (_viewModel is not null)
         {
-            await _viewModel.CreateSessionAsync(_viewModel.CurrentWorkId);
+            await _viewModel.CreateSessionAsync(workId: null);
             PromptBox.Focus(FocusState.Programmatic);
         }
     }
