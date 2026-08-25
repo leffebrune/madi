@@ -54,15 +54,54 @@
                     HorizontalAlignment="{Binding Kind, Converter={StaticResource TimelineAlignment}}"
                     Background="{Binding Kind, Converter={StaticResource TimelineBrush}}">
                 <StackPanel Spacing="7">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <TextBlock Text="{Binding RoleLabel}" FontWeight="SemiBold" />
-                        <ProgressRing Width="14" Height="14"
+                    <TextBlock Text="{Binding RoleLabel}"
+                               FontWeight="SemiBold"
+                               Visibility="{Binding ShowsRoleLabel, Converter={StaticResource BoolToVisibility}}" />
+                    <Button Content="원문 복사"
+                            Padding="8,2"
+                            HorizontalAlignment="Right"
+                            Click="OnCopyAssistantMarkdown"
+                            Visibility="{Binding IsAssistant, Converter={StaticResource BoolToVisibility}}"
+                            ToolTipService.ToolTip="Markdown 원문 복사"
+                            AutomationProperties.Name="Markdown 원문 복사" />
+                    <local:MarkdownView Markdown="{Binding Text}"
+                                        Visibility="{Binding IsActivity, Converter={StaticResource InverseBoolToVisibility}}" />
+                    <Grid ColumnSpacing="6"
+                          Visibility="{Binding IsActivity, Converter={StaticResource BoolToVisibility}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ProgressRing Width="14"
+                                      Height="14"
+                                      VerticalAlignment="Top"
                                       IsActive="{Binding IsRunning}"
                                       Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}}" />
-                    </StackPanel>
-                    <local:MarkdownView Markdown="{Binding Text}" />
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding Text}"
+                                   FontWeight="SemiBold"
+                                   IsTextSelectionEnabled="True" />
+                        <TextBlock Grid.Column="2" Text="—" />
+                        <TextBlock Grid.Column="3"
+                                   Text="{Binding Description}"
+                                   TextWrapping="Wrap"
+                                   IsTextSelectionEnabled="True" />
+                        <Button Grid.Column="4"
+                                Content="{Binding ActivityToggleLabel}"
+                                Padding="8,2"
+                                VerticalAlignment="Top"
+                                Click="OnToggleActivityDetails"
+                                ToolTipService.ToolTip="도구 및 서브에이전트 상세 보기"
+                                AutomationProperties.Name="{Binding ActivityToggleLabel}" />
+                    </Grid>
+                    <local:MarkdownView Margin="0,8,0,0"
+                                        Markdown="{Binding Details}"
+                                        Visibility="{Binding IsActivityExpanded, Converter={StaticResource BoolToVisibility}}" />
                     <Expander Header="상세"
-                              Visibility="{Binding HasDetails, Converter={StaticResource BoolToVisibility}}">
+                              Visibility="{Binding ShowsStandaloneDetails, Converter={StaticResource BoolToVisibility}}">
                         <local:MarkdownView Margin="0,8,0,0" Markdown="{Binding Details}" />
                     </Expander>
                 </StackPanel>
@@ -115,8 +154,9 @@
                     </Grid.RowDefinitions>
                     <TextBlock Text="대화" FontSize="20" FontWeight="SemiBold" Margin="6,6,6,12" />
                     <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
-                        <Button Content="새 대화" Click="OnNewSession"
+                        <Button Content="새 대화" Click="OnNewSessionMenu"
                                 IsEnabled="{Binding CanInteract}"
+                                ToolTipService.ToolTip="새 대화 유형 선택"
                                 AutomationProperties.Name="새 대화 만들기" />
                         <Button Content="새 Work" Click="OnNewWork"
                                 IsEnabled="{Binding CanInteract}"
@@ -200,8 +240,10 @@
                               ItemTemplate="{StaticResource TimelineTemplate}"
                               SelectionMode="None"
                               IsItemClickEnabled="False"
-                              IsTabStop="False"
-                              AllowFocusOnInteraction="False"
+                              IsTabStop="True"
+                              AllowFocusOnInteraction="True"
+                              UseSystemFocusVisuals="False"
+                              PreviewKeyDown="OnTimelinePreviewKeyDown"
                               HorizontalContentAlignment="Stretch"
                               AutomationProperties.Name="대화 타임라인">
                         <ListView.ItemContainerStyle>
@@ -280,35 +322,37 @@
 
             </Grid>
 
-            <primitives:Thumb Grid.Column="1"
-                              DragDelta="OnLeftSplitterDragDelta"
-                              ToolTipService.ToolTip="드래그하여 대화 목록 너비 조절"
-                              AutomationProperties.Name="대화 목록 패널 크기 조절">
-                <primitives:Thumb.Template>
-                    <ControlTemplate TargetType="primitives:Thumb">
-                        <Grid Background="Transparent">
-                            <Border Width="1"
-                                    HorizontalAlignment="Center"
-                                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-                        </Grid>
-                    </ControlTemplate>
-                </primitives:Thumb.Template>
-            </primitives:Thumb>
+            <local:ColumnResizeCursorRegion Grid.Column="1">
+                <primitives:Thumb DragDelta="OnLeftSplitterDragDelta"
+                                  ToolTipService.ToolTip="드래그하여 대화 목록 너비 조절"
+                                  AutomationProperties.Name="대화 목록 패널 크기 조절">
+                    <primitives:Thumb.Template>
+                        <ControlTemplate TargetType="primitives:Thumb">
+                            <Grid Background="Transparent">
+                                <Border Width="1"
+                                        HorizontalAlignment="Center"
+                                        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                            </Grid>
+                        </ControlTemplate>
+                    </primitives:Thumb.Template>
+                </primitives:Thumb>
+            </local:ColumnResizeCursorRegion>
 
-            <primitives:Thumb Grid.Column="3"
-                              DragDelta="OnRightSplitterDragDelta"
-                              ToolTipService.ToolTip="드래그하여 Work 관리 패널 너비 조절"
-                              AutomationProperties.Name="Work 관리 패널 크기 조절">
-                <primitives:Thumb.Template>
-                    <ControlTemplate TargetType="primitives:Thumb">
-                        <Grid Background="Transparent">
-                            <Border Width="1"
-                                    HorizontalAlignment="Center"
-                                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-                        </Grid>
-                    </ControlTemplate>
-                </primitives:Thumb.Template>
-            </primitives:Thumb>
+            <local:ColumnResizeCursorRegion Grid.Column="3">
+                <primitives:Thumb DragDelta="OnRightSplitterDragDelta"
+                                  ToolTipService.ToolTip="드래그하여 Work 관리 패널 너비 조절"
+                                  AutomationProperties.Name="Work 관리 패널 크기 조절">
+                    <primitives:Thumb.Template>
+                        <ControlTemplate TargetType="primitives:Thumb">
+                            <Grid Background="Transparent">
+                                <Border Width="1"
+                                        HorizontalAlignment="Center"
+                                        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                            </Grid>
+                        </ControlTemplate>
+                    </primitives:Thumb.Template>
+                </primitives:Thumb>
+            </local:ColumnResizeCursorRegion>
 
             <Border Grid.Column="4"
                     Background="{ThemeResource LayerFillColorDefaultBrush}">

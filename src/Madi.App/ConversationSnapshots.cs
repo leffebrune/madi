@@ -36,7 +36,9 @@ public sealed record ConversationEntrySnapshot(
     string Summary,
     string? Details = null,
     string? ActivityId = null,
-    bool IsError = false);
+    bool IsError = false,
+    string? ActivityInput = null,
+    string? ActivityName = null);
 
 public sealed record ConversationSnapshot(
     SessionSnapshot Session,
@@ -99,7 +101,9 @@ public static class ConversationSnapshotFactory
                 $"서브에이전트 {name}",
                 $"### 프롬프트\n{task}\n\n### 결과\n{result?.Output ?? "결과 없음"}",
                 call.CallId,
-                result?.IsError ?? false);
+                result?.IsError ?? false,
+                task,
+                name);
         }
 
         return new ConversationEntrySnapshot(
@@ -107,7 +111,9 @@ public static class ConversationSnapshotFactory
             call.Name,
             $"### 인자\n```json\n{call.Arguments}\n```\n\n### 결과\n```text\n{result?.Output ?? "결과 없음"}\n```",
             call.CallId,
-            result?.IsError ?? false);
+            result?.IsError ?? false,
+            call.Arguments,
+            call.Name);
     }
 
     private static (string Name, string Task) ParseSubagent(string arguments)

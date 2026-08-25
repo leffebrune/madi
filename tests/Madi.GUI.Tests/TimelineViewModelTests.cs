@@ -15,17 +15,21 @@ public sealed class TimelineViewModelTests
         await viewModel.ApplyExternalEventAsync(new AppUserInput("질문"));
         await viewModel.ApplyExternalEventAsync(new AppAssistantDelta("답"));
         await viewModel.ApplyExternalEventAsync(new AppAssistantDelta("변"));
-        await viewModel.ApplyExternalEventAsync(new AppToolStarted("call-1", "read", "{}"));
+        await viewModel.ApplyExternalEventAsync(new AppToolStarted(
+            "call-1",
+            "read",
+            """{"path":"file.txt"}"""));
         await viewModel.ApplyExternalEventAsync(new AppToolCompleted(
             "call-1",
             "read",
-            "{}",
+            """{"path":"file.txt"}""",
             "결과",
             IsError: false));
 
         Assert.Equal("답변", viewModel.Timeline[1].Text);
         var tool = Assert.Single(viewModel.Timeline, item => item.Kind == TimelineItemKind.Tool);
         Assert.False(tool.IsRunning);
+        Assert.Equal("file.txt", tool.Description);
         Assert.Contains("결과", tool.Details, StringComparison.Ordinal);
     }
 
@@ -86,7 +90,8 @@ public sealed class TimelineViewModelTests
                     "read",
                     "결과",
                     "call-1",
-                    IsError: true),
+                    IsError: true,
+                    ActivityInput: """{"path":"src/Main.cs","offset":5,"limit":10}"""),
             ]);
 
         await viewModel.ApplyExternalEventAsync(new AppConversationLoaded(snapshot));
@@ -94,6 +99,9 @@ public sealed class TimelineViewModelTests
         Assert.Equal("복원", viewModel.HeaderTitle);
         Assert.Equal(2, viewModel.Timeline.Count);
         Assert.True(viewModel.Timeline[1].IsError);
+        Assert.Equal(
+            $"src/Main.cs{Environment.NewLine}offset 5 · limit 10",
+            viewModel.Timeline[1].Description);
     }
 
     [Fact]
