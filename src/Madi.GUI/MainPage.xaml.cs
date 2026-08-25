@@ -5,7 +5,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage.Pickers;
 using Windows.System;
@@ -18,7 +17,8 @@ public sealed partial class MainPage : Page
     private readonly ObservableCollection<string> _recentWorkspaces = [];
     private MainViewModel? _viewModel;
     private CancellationTokenSource? _workspaceCancellation;
-    private ScrollViewer? _timelineScroller;
+    private bool _isTimelineScrollPending;
+    private bool _isAutoScrollingTimeline;
 
     public MainPage()
     {
@@ -41,11 +41,6 @@ public sealed partial class MainPage : Page
     {
         Loaded -= OnLoaded;
         await LoadRecentWorkspacesAsync();
-        _timelineScroller = FindVisualChild<ScrollViewer>(TimelineList);
-        if (_timelineScroller is not null)
-        {
-            _timelineScroller.ViewChanged += OnTimelineViewChanged;
-        }
     }
 
     private async Task LoadRecentWorkspacesAsync()
@@ -134,6 +129,15 @@ public sealed partial class MainPage : Page
             Shell.Visibility = Visibility.Visible;
             LegacyInfoBar.IsOpen = _viewModel.LegacyItemCount > 0;
             PromptBox.Focus(FocusState.Programmatic);
+            var openedViewModel = _viewModel;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (ReferenceEquals(_viewModel, openedViewModel))
+                {
+                    openedViewModel.FollowLatest = true;
+                    ScrollTimelineToEnd();
+                }
+            });
             _ = RunUtilityInstallerAsync(
                 host.UtilityInstaller,
                 _viewModel,
@@ -177,34 +181,103 @@ public sealed partial class MainPage : Page
 
     private void OnTimelineChanged(object? sender, EventArgs e)
     {
-        if (_viewModel?.FollowLatest == true && _viewModel.Timeline.LastOrDefault() is { } last)
+        if (_viewModel?.FollowLatest == true)
         {
-            TimelineList.UpdateLayout();
-            TimelineList.ScrollIntoView(last);
+            ScrollTimelineToEnd();
         }
     }
 
     private void OnTimelineViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
     {
-        if (_viewModel is null || _timelineScroller is null)
+        if (_viewModel is null)
         {
             return;
         }
 
-        var atBottom = _timelineScroller.ScrollableHeight - _timelineScroller.VerticalOffset < 24;
-        _viewModel.FollowLatest = atBottom;
+        var atBottom = IsTimelineAtBottom();
+        if (!_isAutoScrollingTimeline)
+        {
+            _viewModel.FollowLatest = atBottom;
+        }
         LatestButton.Visibility = atBottom ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void OnGoLatest(object sender, RoutedEventArgs e)
     {
-        if (_viewModel?.Timeline.LastOrDefault() is { } last)
+        if (_viewModel is null)
         {
-            _viewModel.FollowLatest = true;
-            TimelineList.ScrollIntoView(last);
-            LatestButton.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        _viewModel.FollowLatest = true;
+        ScrollTimelineToEnd();
+        LatestButton.Visibility = Visibility.Collapsed;
+    }
+
+    private void ScrollTimelineToEnd()
+    {
+        if (_isTimelineScrollPending)
+        {
+            return;
+        }
+
+        _isTimelineScrollPending = true;
+        _isAutoScrollingTimeline = true;
+        if (!DispatcherQueue.TryEnqueue(
+                Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                () => ApplyTimelineScrollToEnd(verifyAfterLayout: true)))
+        {
+            _isTimelineScrollPending = false;
+            _isAutoScrollingTimeline = false;
         }
     }
+
+    private void ApplyTimelineScrollToEnd(bool verifyAfterLayout)
+    {
+        if (_viewModel?.FollowLatest != true)
+        {
+            _isTimelineScrollPending = false;
+            _isAutoScrollingTimeline = false;
+            return;
+        }
+
+        TimelineScroller.UpdateLayout();
+        TimelineScroller.ChangeView(
+            horizontalOffset: null,
+            verticalOffset: TimelineScroller.ScrollableHeight,
+            zoomFactor: null,
+            disableAnimation: true);
+
+        // Markdown rendering changes the item height after its Text binding has updated.
+        // Run once more on the next layout pass so ChangeView does not use a stale extent.
+        if (verifyAfterLayout && DispatcherQueue.TryEnqueue(
+                Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                () => ApplyTimelineScrollToEnd(verifyAfterLayout: false)))
+        {
+            return;
+        }
+
+        if (DispatcherQueue.TryEnqueue(
+                Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                CompleteTimelineScrollToEnd))
+        {
+            return;
+        }
+
+        CompleteTimelineScrollToEnd();
+    }
+
+    private void CompleteTimelineScrollToEnd()
+    {
+        _isTimelineScrollPending = false;
+        _isAutoScrollingTimeline = false;
+        LatestButton.Visibility = IsTimelineAtBottom()
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
+    private bool IsTimelineAtBottom() =>
+        TimelineScroller.ScrollableHeight - TimelineScroller.VerticalOffset < 24;
 
     private void OnCopyAssistantMarkdown(object sender, RoutedEventArgs e)
     {
@@ -238,23 +311,18 @@ public sealed partial class MainPage : Page
 
     private void OnTimelinePreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (_timelineScroller is null)
-        {
-            return;
-        }
-
         const double lineScrollAmount = 48;
         var pageScrollAmount = Math.Max(
             lineScrollAmount,
-            _timelineScroller.ViewportHeight - lineScrollAmount);
+            TimelineScroller.ViewportHeight - lineScrollAmount);
         var targetOffset = e.Key switch
         {
-            VirtualKey.Up => _timelineScroller.VerticalOffset - lineScrollAmount,
-            VirtualKey.Down => _timelineScroller.VerticalOffset + lineScrollAmount,
-            VirtualKey.PageUp => _timelineScroller.VerticalOffset - pageScrollAmount,
-            VirtualKey.PageDown => _timelineScroller.VerticalOffset + pageScrollAmount,
+            VirtualKey.Up => TimelineScroller.VerticalOffset - lineScrollAmount,
+            VirtualKey.Down => TimelineScroller.VerticalOffset + lineScrollAmount,
+            VirtualKey.PageUp => TimelineScroller.VerticalOffset - pageScrollAmount,
+            VirtualKey.PageDown => TimelineScroller.VerticalOffset + pageScrollAmount,
             VirtualKey.Home => 0,
-            VirtualKey.End => _timelineScroller.ScrollableHeight,
+            VirtualKey.End => TimelineScroller.ScrollableHeight,
             _ => double.NaN,
         };
         if (double.IsNaN(targetOffset))
@@ -262,8 +330,8 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        targetOffset = Math.Clamp(targetOffset, 0, _timelineScroller.ScrollableHeight);
-        _timelineScroller.ChangeView(
+        targetOffset = Math.Clamp(targetOffset, 0, TimelineScroller.ScrollableHeight);
+        TimelineScroller.ChangeView(
             horizontalOffset: null,
             verticalOffset: targetOffset,
             zoomFactor: null,
@@ -553,20 +621,4 @@ public sealed partial class MainPage : Page
         WorkspaceError.IsOpen = true;
     }
 
-    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
-    {
-        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, index);
-            if (child is T match)
-            {
-                return match;
-            }
-            if (FindVisualChild<T>(child) is { } nested)
-            {
-                return nested;
-            }
-        }
-        return null;
-    }
 }

@@ -5,8 +5,6 @@ namespace Madi.Runtime.Agents;
 
 public sealed class SubagentRunner : ISubagentRunner
 {
-    private const int DefaultMaxToolRounds = 16;
-
     private readonly IModelProvider _provider;
     private readonly IReadOnlyDictionary<string, SubagentDefinition> _definitions;
     private readonly IReadOnlyDictionary<string, ITool> _tools;
@@ -81,7 +79,6 @@ public sealed class SubagentRunner : ISubagentRunner
                 Id = $"subagent-{Guid.CreateVersion7()}",
                 Title = $"Subagent: {definition.Name}",
                 Model = definition.ToModelOptions(_availableModels),
-                MaxToolRounds = definition.MaxToolRounds ?? DefaultMaxToolRounds,
                 Instructions = definition.Instructions,
             };
 

@@ -907,11 +907,14 @@ public sealed class MadiController
     {
         var works = await _store.LoadWorksAsync(cancellationToken);
         var sessions = await _store.LoadSessionsAsync(cancellationToken);
+        var sessionsByWorkId = sessions
+            .Where(static session => session.WorkId is not null)
+            .ToLookup(static session => session.WorkId!, StringComparer.Ordinal);
         var currentWorks = works
             .Where(work => IsCurrentWorkspace(work.WorkingDirectory))
             .Select(work =>
             {
-                var children = work.Sessions
+                var children = sessionsByWorkId[work.Id]
                     .Where(session => IsCurrentWorkspace(session.WorkingDirectory))
                     .OrderByDescending(static session => session.UpdatedAtUtc)
                     .Select(CreateSessionNavigationSnapshot)

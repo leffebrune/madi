@@ -30,20 +30,7 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
         await FileLock.WaitAsync(cancellationToken);
         try
         {
-            var works = await LoadAllWorksUnlockedAsync(cancellationToken);
-            var sessions = await LoadAllSessionsUnlockedAsync(cancellationToken);
-            var worksById = works.ToDictionary(static work => work.Id, StringComparer.Ordinal);
-
-            foreach (var session in sessions)
-            {
-                if (session.WorkId is not null
-                    && worksById.TryGetValue(session.WorkId, out var work))
-                {
-                    work.Sessions.Add(session);
-                }
-            }
-
-            return works;
+            return await LoadAllWorksUnlockedAsync(cancellationToken);
         }
         finally
         {
@@ -57,7 +44,7 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
         await FileLock.WaitAsync(cancellationToken);
         try
         {
-            return await LoadAllSessionsUnlockedAsync(cancellationToken);
+            return await LoadAllSessionMetadataUnlockedAsync(cancellationToken);
         }
         finally
         {
@@ -83,6 +70,7 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
 
             var session = await LoadSessionUnlockedAsync(
                 current.SessionId,
+                includeConversation: true,
                 cancellationToken);
             if (session is null)
             {
@@ -115,7 +103,10 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
         await FileLock.WaitAsync(cancellationToken);
         try
         {
-            var session = await LoadSessionUnlockedAsync(sessionId, cancellationToken);
+            var session = await LoadSessionUnlockedAsync(
+                sessionId,
+                includeConversation: true,
+                cancellationToken);
             if (session is null)
             {
                 return null;
@@ -371,7 +362,7 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
         return works;
     }
 
-    private async Task<List<Session>> LoadAllSessionsUnlockedAsync(
+    private async Task<List<Session>> LoadAllSessionMetadataUnlockedAsync(
         CancellationToken cancellationToken)
     {
         if (!Directory.Exists(_sessionsPath))
@@ -383,7 +374,10 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
         foreach (var directory in Directory.EnumerateDirectories(_sessionsPath))
         {
             var sessionId = Path.GetFileName(directory);
-            var session = await LoadSessionUnlockedAsync(sessionId, cancellationToken);
+            var session = await LoadSessionUnlockedAsync(
+                sessionId,
+                includeConversation: false,
+                cancellationToken);
             if (session is not null)
             {
                 sessions.Add(session);
@@ -415,6 +409,7 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
 
     private async Task<Session?> LoadSessionUnlockedAsync(
         string sessionId,
+        bool includeConversation,
         CancellationToken cancellationToken)
     {
         ValidateId(sessionId, nameof(sessionId));
@@ -433,7 +428,7 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
             File.GetLastWriteTimeUtc(metadataPath));
 
         var conversationPath = GetConversationPath(sessionId);
-        if (!File.Exists(conversationPath))
+        if (!includeConversation || !File.Exists(conversationPath))
         {
             return session;
         }
@@ -588,13 +583,6 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
         if (session.WorkId is not null)
         {
             ValidateId(session.WorkId, nameof(session.WorkId));
-        }
-
-        if (session.MaxToolRounds <= 0)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(session),
-                "Maximum tool rounds must be greater than zero.");
         }
 
         if (string.IsNullOrWhiteSpace(session.Instructions))

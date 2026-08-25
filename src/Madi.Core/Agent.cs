@@ -9,6 +9,8 @@ namespace Madi.Core;
 /// </summary>
 public sealed class Agent : IAgent
 {
+    public const int MaxToolRounds = 80;
+
     private readonly IModelProvider _provider;
     private readonly IReadOnlyList<ITool> _tools;
     private readonly IReadOnlyDictionary<string, ITool> _toolsByName;
@@ -32,13 +34,6 @@ public sealed class Agent : IAgent
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         ValidateWorkSessionRelationship(work, session);
 
-        if (session.MaxToolRounds <= 0)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(session),
-                "The session's maximum tool rounds must be greater than zero.");
-        }
-
         if (string.IsNullOrWhiteSpace(session.Instructions))
         {
             throw new ArgumentException(
@@ -51,7 +46,7 @@ public sealed class Agent : IAgent
             new UserMessage(prompt),
         };
 
-        for (var round = 0; round < session.MaxToolRounds; round++)
+        for (var round = 0; round < MaxToolRounds; round++)
         {
             ModelResponse? response = null;
 
@@ -213,7 +208,7 @@ public sealed class Agent : IAgent
         }
 
         throw new InvalidOperationException(
-            $"The model exceeded the maximum of {session.MaxToolRounds} consecutive tool-call rounds.");
+            $"The model exceeded the maximum of {MaxToolRounds} consecutive tool-call rounds.");
     }
 
     private static void ValidateWorkSessionRelationship(Work? work, Session session)

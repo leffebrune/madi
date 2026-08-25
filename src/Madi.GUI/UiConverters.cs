@@ -57,7 +57,7 @@ public sealed class TimelineBrushConverter : IValueConverter
     {
         var color = value is TimelineItemKind kind ? kind switch
         {
-            TimelineItemKind.User => ColorHelper.FromArgb(255, 31, 86, 145),
+            TimelineItemKind.User => ColorHelper.FromArgb(255, 117, 224, 214),
             TimelineItemKind.Error => ColorHelper.FromArgb(70, 196, 43, 28),
             TimelineItemKind.Warning => ColorHelper.FromArgb(60, 255, 185, 0),
             TimelineItemKind.Tool => ColorHelper.FromArgb(45, 0, 120, 212),
@@ -74,7 +74,7 @@ public sealed class TimelineBrushConverter : IValueConverter
 public sealed class TimelineAlignmentConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, string language) =>
-        value is TimelineItemKind.User ? HorizontalAlignment.Right : HorizontalAlignment.Stretch;
+        value is TimelineItemKind.User ? HorizontalAlignment.Right : HorizontalAlignment.Left;
 
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>
         throw new NotSupportedException();

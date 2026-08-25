@@ -19,7 +19,7 @@ public sealed class FileWorkSessionStoreTests
             """{"id":"work-1","title":"기존 Work","context":""}""");
         await File.WriteAllTextAsync(
             Path.Combine(sessionDirectory, "session.json"),
-            """{"schemaVersion":1,"id":"session-1","title":"기존 대화","workId":"work-1","model":{"model":"first","reasoningEffort":"medium"},"maxToolRounds":30,"instructions":"help"}""");
+            """{"schemaVersion":1,"id":"session-1","title":"기존 대화","workId":"work-1","model":{"model":"first","reasoningEffort":"medium"},"instructions":"help"}""");
         await File.WriteAllTextAsync(
             Path.Combine(sessionDirectory, "conversation.jsonl"),
             """
@@ -46,6 +46,7 @@ public sealed class FileWorkSessionStoreTests
             Path.Combine(sessionDirectory, "session.json")));
         Assert.Equal(2, workJson.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Equal(2, sessionJson.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.False(sessionJson.RootElement.TryGetProperty("maxToolRounds", out _));
         Assert.Equal(directory.Path, sessionJson.RootElement.GetProperty("workingDirectory").GetString());
     }
 
@@ -85,6 +86,45 @@ public sealed class FileWorkSessionStoreTests
         Assert.Equal("장기 목표와 제약", loaded?.Work?.Context);
         Assert.Equal(now, loaded?.Session.CreatedAtUtc);
         Assert.True(Assert.IsType<ToolResult>(Assert.Single(loaded!.Session.Conversation)).IsError);
+    }
+
+    [Fact]
+    public async Task ListLoadsMetadataWithoutLoadingConversationBodies()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new FileWorkSessionStore(directory.Path);
+        var now = DateTimeOffset.UtcNow;
+        var work = new Work
+        {
+            Id = "work-1",
+            Title = "작업",
+            WorkingDirectory = directory.Path,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+        };
+        var session = new Session
+        {
+            Id = "session-1",
+            Title = "대화",
+            WorkId = work.Id,
+            WorkingDirectory = directory.Path,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            Model = new ModelOptions("first"),
+        };
+        session.Conversation.Add(new UserMessage("필요할 때만 읽을 본문"));
+
+        await store.SaveWorkAsync(work);
+        await store.SaveSessionAsync(session);
+        await store.AppendConversationAsync(session, 0);
+
+        var listedWork = Assert.Single(await store.LoadWorksAsync());
+        var listedSession = Assert.Single(await store.LoadSessionsAsync());
+        var loadedConversation = await store.LoadConversationAsync(session.Id);
+
+        Assert.Empty(listedWork.Sessions);
+        Assert.Empty(listedSession.Conversation);
+        Assert.Single(loadedConversation!.Session.Conversation);
     }
 
     [Fact]

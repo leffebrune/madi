@@ -10,7 +10,6 @@ public sealed record SubagentDefinition
     public required string Description { get; init; }
     public required string Model { get; init; }
     public required IReadOnlyList<string> Tools { get; init; }
-    public int? MaxToolRounds { get; init; }
     public required string Instructions { get; init; }
 
     public void Validate()
@@ -41,11 +40,6 @@ public sealed record SubagentDefinition
         if (Tools.Distinct(StringComparer.Ordinal).Count() != Tools.Count)
         {
             throw new InvalidDataException($"Subagent '{Name}' contains duplicate tool names.");
-        }
-
-        if (MaxToolRounds is <= 0)
-        {
-            throw new InvalidDataException($"Subagent '{Name}' must have a positive maximum tool round count.");
         }
 
         if (string.IsNullOrWhiteSpace(Instructions))
