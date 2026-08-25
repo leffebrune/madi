@@ -17,6 +17,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string? _selectedModelName;
     private string? _currentWorkId;
     private string _currentWorkPrompt = string.Empty;
+    private string _workPromptDraft = string.Empty;
+    private string _usageText = "사용량 정보 없음";
     private string? _errorText;
     private bool _isBusy;
     private bool _isSignedIn;
@@ -91,6 +93,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _currentWorkId, value))
             {
                 OnPropertyChanged(nameof(HasCurrentWork));
+                OnPropertyChanged(nameof(CanSaveWorkPrompt));
             }
         }
     }
@@ -98,10 +101,38 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string CurrentWorkPrompt
     {
         get => _currentWorkPrompt;
-        private set => SetProperty(ref _currentWorkPrompt, value);
+        private set
+        {
+            if (SetProperty(ref _currentWorkPrompt, value))
+            {
+                OnPropertyChanged(nameof(CanSaveWorkPrompt));
+            }
+        }
+    }
+
+    public string WorkPromptDraft
+    {
+        get => _workPromptDraft;
+        set
+        {
+            if (SetProperty(ref _workPromptDraft, value))
+            {
+                OnPropertyChanged(nameof(CanSaveWorkPrompt));
+            }
+        }
     }
 
     public bool HasCurrentWork => CurrentWorkId is not null;
+    public bool CanSaveWorkPrompt => HasCurrentWork && CanInteract && IsWorkPromptDirty;
+
+    private bool IsWorkPromptDirty =>
+        !string.Equals(WorkPromptDraft, CurrentWorkPrompt, StringComparison.Ordinal);
+
+    public string UsageText
+    {
+        get => _usageText;
+        private set => SetProperty(ref _usageText, value);
+    }
 
     public string? ErrorText
     {
@@ -125,6 +156,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _isBusy, value))
             {
                 OnPropertyChanged(nameof(CanInteract));
+                OnPropertyChanged(nameof(CanSaveWorkPrompt));
                 OnPropertyChanged(nameof(SendButtonText));
             }
         }
@@ -183,8 +215,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public Task CreateWorkAsync(string title) =>
         ExecuteAsync(new CreateWorkAction(title));
 
-    public Task UpdateWorkPromptAsync(string prompt) =>
-        ExecuteAsync(new UpdateWorkPromptAction(prompt));
+    public Task SaveWorkPromptAsync()
+    {
+        if (!CanSaveWorkPrompt)
+        {
+            return Task.CompletedTask;
+        }
+
+        var prompt = WorkPromptDraft.Trim();
+        WorkPromptDraft = prompt;
+        return ExecuteAsync(new UpdateWorkPromptAction(prompt));
+    }
 
     public Task ActivateSessionAsync(string sessionId) =>
         ExecuteAsync(new ActivateSessionAction(sessionId));
@@ -276,9 +317,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 break;
             case AppConversationCleared:
                 Timeline.Clear();
+                UsageText = "사용량 정보 없음";
                 break;
             case AppUserInput user:
                 Timeline.Add(new TimelineItemViewModel(TimelineItemKind.User, user.Text));
+                UsageText = "응답 사용량 계산 중…";
                 Draft = string.Empty;
                 Suggestions.Clear();
                 break;
@@ -334,10 +377,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                     subagent.IsError);
                 break;
             case AppUsageReported usage:
-                Timeline.Add(new TimelineItemViewModel(
-                    TimelineItemKind.Usage,
-                    $"입력 {Format(usage.Usage.InputTokens)} · 출력 {Format(usage.Usage.OutputTokens)} · 합계 {Format(usage.Usage.TotalTokens)}"));
-                break;
+                UsageText = $"입력 {Format(usage.Usage.InputTokens)} · 출력 {Format(usage.Usage.OutputTokens)} · 합계 {Format(usage.Usage.TotalTokens)}";
+                return;
             case AppMessage message:
                 var kind = message.Kind switch
                 {
@@ -375,8 +416,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         IsBusy = state.IsBusy;
         SelectedModelName = state.Model.Model;
-        CurrentWorkId = state.Work?.Id;
+
+        var nextWorkId = state.Work?.Id;
+        var workChanged = !string.Equals(CurrentWorkId, nextWorkId, StringComparison.Ordinal);
+        CurrentWorkId = nextWorkId;
         CurrentWorkPrompt = state.Work?.Prompt ?? string.Empty;
+        if (workChanged || !IsWorkPromptDirty)
+        {
+            WorkPromptDraft = CurrentWorkPrompt;
+        }
         HeaderTitle = state.Session?.Title ?? "새 대화";
         WorkingDirectory = state.WorkingDirectory;
         IsSignedIn = state.Authentication == AuthenticationState.SignedIn;
@@ -437,6 +485,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void ApplyConversation(ConversationSnapshot conversation)
     {
         Timeline.Clear();
+        UsageText = "사용량 정보 없음";
         foreach (var entry in conversation.Entries)
         {
             Timeline.Add(new TimelineItemViewModel(
