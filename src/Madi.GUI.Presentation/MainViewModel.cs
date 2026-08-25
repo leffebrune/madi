@@ -16,6 +16,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _authenticationLabel = "확인 중";
     private string? _selectedModelName;
     private string? _currentWorkId;
+    private string _currentWorkPrompt = string.Empty;
     private string? _errorText;
     private bool _isBusy;
     private bool _isSignedIn;
@@ -85,8 +86,22 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string? CurrentWorkId
     {
         get => _currentWorkId;
-        private set => SetProperty(ref _currentWorkId, value);
+        private set
+        {
+            if (SetProperty(ref _currentWorkId, value))
+            {
+                OnPropertyChanged(nameof(HasCurrentWork));
+            }
+        }
     }
+
+    public string CurrentWorkPrompt
+    {
+        get => _currentWorkPrompt;
+        private set => SetProperty(ref _currentWorkPrompt, value);
+    }
+
+    public bool HasCurrentWork => CurrentWorkId is not null;
 
     public string? ErrorText
     {
@@ -167,6 +182,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public Task CreateWorkAsync(string title) =>
         ExecuteAsync(new CreateWorkAction(title));
+
+    public Task UpdateWorkPromptAsync(string prompt) =>
+        ExecuteAsync(new UpdateWorkPromptAction(prompt));
 
     public Task ActivateSessionAsync(string sessionId) =>
         ExecuteAsync(new ActivateSessionAction(sessionId));
@@ -358,6 +376,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         IsBusy = state.IsBusy;
         SelectedModelName = state.Model.Model;
         CurrentWorkId = state.Work?.Id;
+        CurrentWorkPrompt = state.Work?.Prompt ?? string.Empty;
         HeaderTitle = state.Session?.Title ?? "새 대화";
         WorkingDirectory = state.WorkingDirectory;
         IsSignedIn = state.Authentication == AuthenticationState.SignedIn;

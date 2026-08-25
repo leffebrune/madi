@@ -43,6 +43,37 @@ public sealed class MadiControllerTests
     }
 
     [Fact]
+    public async Task WorkPromptCanBeUpdatedAndIsExposedInState()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var work = new Work
+        {
+            Id = "work-1",
+            Title = "작업",
+            Context = "기존 프롬프트",
+            WorkingDirectory = "C:\\work",
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+        };
+        var session = Session("session-1", "대화", work.Id, "C:\\work", now);
+        work.Sessions.Add(session);
+        var store = new RecordingStore
+        {
+            Current = new CurrentConversation(work, session),
+        };
+        store.Works.Add(work);
+        store.Sessions.Add(session);
+        var controller = CreateController(store: store);
+
+        var events = await CollectAsync(controller.ExecuteAsync(
+            new UpdateWorkPromptAction("  새로운 장기 목표와 제약  ")));
+
+        Assert.Equal("새로운 장기 목표와 제약", work.Context);
+        Assert.Equal("새로운 장기 목표와 제약", controller.State.Work?.Prompt);
+        Assert.Contains(events, item => item is AppTurnCompleted { Succeeded: true });
+    }
+
+    [Fact]
     public async Task NewSessionUsesSuppliedDefaultInstructions()
     {
         var store = new RecordingStore();

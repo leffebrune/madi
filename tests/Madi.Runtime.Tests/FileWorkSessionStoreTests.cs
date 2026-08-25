@@ -59,7 +59,7 @@ public sealed class FileWorkSessionStoreTests
         {
             Id = "work-1",
             Title = "작업",
-            Context = string.Empty,
+            Context = "장기 목표와 제약",
             WorkingDirectory = directory.Path,
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
@@ -82,6 +82,7 @@ public sealed class FileWorkSessionStoreTests
         var loaded = await store.LoadConversationAsync(session.Id);
 
         Assert.Equal(Path.GetFullPath(directory.Path), loaded?.Session.WorkingDirectory);
+        Assert.Equal("장기 목표와 제약", loaded?.Work?.Context);
         Assert.Equal(now, loaded?.Session.CreatedAtUtc);
         Assert.True(Assert.IsType<ToolResult>(Assert.Single(loaded!.Session.Conversation)).IsError);
     }

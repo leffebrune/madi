@@ -126,6 +126,14 @@ public sealed class OpenAIOAuthProvider : IModelProvider
             writer.WriteString("instructions", request.Instructions);
 
             writer.WriteStartArray("input");
+            if (!string.IsNullOrWhiteSpace(request.WorkInstructions))
+            {
+                WriteMessage(
+                    writer,
+                    "developer",
+                    "input_text",
+                    $"<work_prompt>\n{request.WorkInstructions.Trim()}\n</work_prompt>");
+            }
             foreach (var item in request.Input)
             {
                 WriteInputItem(writer, item);

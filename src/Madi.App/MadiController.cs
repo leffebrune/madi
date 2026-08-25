@@ -267,6 +267,9 @@ public sealed class MadiController
                 create.WorkId,
                 cancellationToken),
             CreateWorkAction create => CreateFreshWorkAsync(create.Title, cancellationToken),
+            UpdateWorkPromptAction update => UpdateCurrentWorkPromptAsync(
+                update.Prompt,
+                cancellationToken),
             ActivateSessionAction activate => ActivateSessionAsync(
                 activate.SessionId,
                 cancellationToken),
@@ -610,6 +613,30 @@ public sealed class MadiController
         yield return new AppTurnCompleted(true);
     }
 
+    private async IAsyncEnumerable<AppEvent> UpdateCurrentWorkPromptAsync(
+        string prompt,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (_currentWork is null || !IsCurrentWorkspace(_currentWork.WorkingDirectory))
+        {
+            yield return new AppMessage(
+                "프롬프트를 수정할 현재 Work가 없습니다.",
+                AppMessageKind.Error);
+            yield return new AppTurnCompleted(false);
+            yield break;
+        }
+
+        _currentWork.Context = prompt.Trim();
+        _currentWork.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await _store.SaveWorkAsync(_currentWork, cancellationToken);
+
+        yield return new AppMessage("Work 프롬프트를 저장했습니다.");
+        yield return new AppNavigationChanged(
+            await CreateNavigationSnapshotAsync(cancellationToken));
+        yield return new AppStateChanged(CreateState());
+        yield return new AppTurnCompleted(true);
+    }
+
     private async IAsyncEnumerable<AppEvent> ActivateSessionAsync(
         string sessionId,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -938,7 +965,9 @@ public sealed class MadiController
 
     private AppState CreateState() => new(
         _selectedModel,
-        _currentWork is null ? null : new WorkSnapshot(_currentWork.Id, _currentWork.Title),
+        _currentWork is null
+            ? null
+            : new WorkSnapshot(_currentWork.Id, _currentWork.Title, _currentWork.Context),
         _currentSession is null
             ? null
             : new SessionSnapshot(_currentSession.Id, _currentSession.Title, _currentSession.WorkId),

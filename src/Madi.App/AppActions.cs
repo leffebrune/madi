@@ -12,6 +12,8 @@ public sealed record CreateSessionAction(string? WorkId = null) : AppAction;
 
 public sealed record CreateWorkAction(string Title) : AppAction;
 
+public sealed record UpdateWorkPromptAction(string Prompt) : AppAction;
+
 public sealed record ActivateSessionAction(string SessionId) : AppAction;
 
 public sealed record DeleteSessionAction(string SessionId) : AppAction;
