@@ -13,7 +13,6 @@ public enum TimelineItemKind
     Error,
     Tool,
     Subagent,
-    Usage,
 }
 
 public sealed class TimelineItemViewModel : ObservableObject
@@ -49,7 +48,6 @@ public sealed class TimelineItemViewModel : ObservableObject
         TimelineItemKind.Subagent => "서브에이전트",
         TimelineItemKind.Warning => "주의",
         TimelineItemKind.Error => "오류",
-        TimelineItemKind.Usage => "사용량",
         _ => "정보",
     };
     public bool HasDetails => !string.IsNullOrWhiteSpace(Details);

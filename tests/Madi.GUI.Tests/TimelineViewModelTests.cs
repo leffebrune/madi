@@ -30,6 +30,50 @@ public sealed class TimelineViewModelTests
     }
 
     [Fact]
+    public async Task WorkPromptDraftSurvivesUnrelatedBusyStateChanges()
+    {
+        var viewModel = CreateViewModel();
+        var work = new WorkSnapshot("work-1", "Work", "저장된 프롬프트");
+
+        await viewModel.ApplyExternalEventAsync(new AppStateChanged(new AppState(
+            new ModelOptions("first"),
+            work,
+            new SessionSnapshot("session-1", "대화", work.Id),
+            AppRunState.Idle,
+            AuthenticationState.SignedIn,
+            "C:\\work")));
+        viewModel.WorkPromptDraft = "수정 중인 프롬프트";
+
+        await viewModel.ApplyExternalEventAsync(new AppStateChanged(new AppState(
+            new ModelOptions("first"),
+            work,
+            new SessionSnapshot("session-1", "대화", work.Id),
+            AppRunState.RunningPrompt,
+            AuthenticationState.SignedIn,
+            "C:\\work")));
+
+        Assert.Equal("수정 중인 프롬프트", viewModel.WorkPromptDraft);
+        Assert.False(viewModel.CanSaveWorkPrompt);
+    }
+
+    [Fact]
+    public async Task UsageUpdatesStatusWithoutAddingTimelineItem()
+    {
+        var viewModel = CreateViewModel();
+
+        await viewModel.ApplyExternalEventAsync(new AppUsageReported(new ModelUsage(
+            InputTokens: 120,
+            CachedTokens: 80,
+            CacheWriteTokens: null,
+            OutputTokens: 30,
+            ReasoningTokens: 10,
+            TotalTokens: 150)));
+
+        Assert.Empty(viewModel.Timeline);
+        Assert.Equal("입력 120 · 출력 30 · 합계 150", viewModel.UsageText);
+    }
+
+    [Fact]
     public async Task ConversationLoadReplacesTimelineAndPreservesActivities()
     {
         var viewModel = CreateViewModel();
