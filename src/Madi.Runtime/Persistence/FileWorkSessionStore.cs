@@ -585,12 +585,6 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
             ValidateId(session.WorkId, nameof(session.WorkId));
         }
 
-        if (string.IsNullOrWhiteSpace(session.Instructions))
-        {
-            throw new ArgumentException("Session instructions are required.", nameof(session));
-        }
-
-
         ValidateOptionalWorkingDirectory(session.WorkingDirectory, nameof(session));
     }
 

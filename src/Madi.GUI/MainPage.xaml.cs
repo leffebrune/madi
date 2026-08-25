@@ -528,6 +528,77 @@ public sealed partial class MainPage : Page
         }
     }
 
+    private void OnToolsMenu(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null || sender is not Button button)
+        {
+            return;
+        }
+
+        var systemPromptItem = new MenuFlyoutItem
+        {
+            Text = "시스템 프롬프트 보기",
+            Icon = new FontIcon { Glyph = "\uE8A5" },
+        };
+        systemPromptItem.Click += OnShowSystemPrompt;
+
+        var menu = new MenuFlyout();
+        menu.Items.Add(systemPromptItem);
+        menu.ShowAt(button);
+    }
+
+    private async void OnShowSystemPrompt(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        var prompt = _viewModel.SystemInstructions;
+        var content = new Grid
+        {
+            Width = Math.Clamp(ActualWidth - 160, 400, 760),
+            Height = Math.Clamp(ActualHeight - 180, 300, 520),
+            RowSpacing = 8,
+        };
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+        content.Children.Add(new TextBlock
+        {
+            Text = "모든 대화에서 모델에 전달되는 현재 Agent instruction입니다. SYSTEM.md와 현재 도구 정보로 생성됩니다.",
+            TextWrapping = TextWrapping.Wrap,
+        });
+        var promptBox = new TextBox
+        {
+            Text = prompt,
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.NoWrap,
+        };
+        ScrollViewer.SetHorizontalScrollBarVisibility(promptBox, ScrollBarVisibility.Auto);
+        ScrollViewer.SetVerticalScrollBarVisibility(promptBox, ScrollBarVisibility.Auto);
+        Grid.SetRow(promptBox, 1);
+        content.Children.Add(promptBox);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "실제 시스템 프롬프트",
+            Content = content,
+            PrimaryButtonText = "복사",
+            CloseButtonText = "닫기",
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            var package = new DataPackage();
+            package.SetText(prompt);
+            Clipboard.SetContent(package);
+        }
+    }
+
     private async void OnToggleAuthentication(object sender, RoutedEventArgs e)
     {
         if (_viewModel is not null)

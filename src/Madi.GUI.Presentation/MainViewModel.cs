@@ -55,6 +55,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public int LegacyItemCount { get; private set; }
 
+    public string SystemInstructions => _controller.SystemInstructions;
+
     public string Draft
     {
         get => _draft;

@@ -74,16 +74,29 @@ public sealed class MadiControllerTests
     }
 
     [Fact]
-    public async Task NewSessionUsesSuppliedDefaultInstructions()
+    public async Task ControllerUsesAgentInstructionsWithoutCopyingThemToSession()
     {
         var store = new RecordingStore();
         const string customInstructions = "Custom system instructions from SYSTEM.md";
-        var controller = CreateController(store: store, defaultInstructions: customInstructions);
+        var controller = CreateController(store: store, systemInstructions: customInstructions);
 
         await CollectAsync(controller.ExecuteAsync("/new"));
 
         Assert.NotNull(store.LastSavedSession);
-        Assert.Equal(customInstructions, store.LastSavedSession.Instructions);
+        Assert.Equal(customInstructions, controller.SystemInstructions);
+    }
+
+    [Fact]
+    public void SystemInstructionsReflectRuntimeAgentChanges()
+    {
+        var agent = new StubAgent(
+            static (_, _) => Task.FromResult<IReadOnlyList<AgentEvent>>([]),
+            "first instructions");
+        var controller = CreateController(agent);
+
+        agent.SystemInstructions = "updated instructions";
+
+        Assert.Equal("updated instructions", controller.SystemInstructions);
     }
 
     [Fact]
@@ -352,8 +365,10 @@ public sealed class MadiControllerTests
         IAgent? agent = null,
         RecordingStore? store = null,
         StubAuthentication? authentication = null,
-        string? defaultInstructions = null) => new(
-        agent ?? new StubAgent(static (_, _) => Task.FromResult<IReadOnlyList<AgentEvent>>([])),
+        string? systemInstructions = null) => new(
+        agent ?? new StubAgent(
+            static (_, _) => Task.FromResult<IReadOnlyList<AgentEvent>>([]),
+            systemInstructions ?? "Helpful test assistant."),
         store ?? new RecordingStore(),
         new ModelOptions("first", ReasoningEffort.Medium),
         [
@@ -361,7 +376,6 @@ public sealed class MadiControllerTests
             Model("second"),
         ],
         authentication ?? new StubAuthentication(),
-        defaultInstructions ?? "Helpful test assistant.",
         "C:\\work");
 
     private static AvailableModel Model(string name) => new()
@@ -383,8 +397,11 @@ public sealed class MadiControllerTests
     }
 
     private sealed class StubAgent(
-        Func<Session, CancellationToken, Task<IReadOnlyList<AgentEvent>>> run) : IAgent
+        Func<Session, CancellationToken, Task<IReadOnlyList<AgentEvent>>> run,
+        string systemInstructions = "Helpful test assistant.") : IAgent
     {
+        public string SystemInstructions { get; set; } = systemInstructions;
+
         public async IAsyncEnumerable<AgentEvent> RespondAsync(
             Work? work,
             Session session,

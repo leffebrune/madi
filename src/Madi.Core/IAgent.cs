@@ -5,6 +5,9 @@ namespace Madi.Core;
 /// </summary>
 public interface IAgent
 {
+    /// <summary>The system instruction used for every session handled by this agent.</summary>
+    string SystemInstructions { get; set; }
+
     IAsyncEnumerable<AgentEvent> RespondAsync(
         Work? work,
         Session session,
