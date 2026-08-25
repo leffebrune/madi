@@ -43,6 +43,19 @@ public sealed class MadiControllerTests
     }
 
     [Fact]
+    public async Task NewSessionUsesSuppliedDefaultInstructions()
+    {
+        var store = new RecordingStore();
+        const string customInstructions = "Custom system instructions from SYSTEM.md";
+        var controller = CreateController(store: store, defaultInstructions: customInstructions);
+
+        await CollectAsync(controller.ExecuteAsync("/new"));
+
+        Assert.NotNull(store.LastSavedSession);
+        Assert.Equal(customInstructions, store.LastSavedSession.Instructions);
+    }
+
+    [Fact]
     public async Task CompletedResponsePublishesToolResultAndPersistsConversation()
     {
         var store = new RecordingStore();
@@ -307,7 +320,8 @@ public sealed class MadiControllerTests
     private static MadiController CreateController(
         IAgent? agent = null,
         RecordingStore? store = null,
-        StubAuthentication? authentication = null) => new(
+        StubAuthentication? authentication = null,
+        string? defaultInstructions = null) => new(
         agent ?? new StubAgent(static (_, _) => Task.FromResult<IReadOnlyList<AgentEvent>>([])),
         store ?? new RecordingStore(),
         new ModelOptions("first", ReasoningEffort.Medium),
@@ -316,6 +330,7 @@ public sealed class MadiControllerTests
             Model("second"),
         ],
         authentication ?? new StubAuthentication(),
+        defaultInstructions ?? "Helpful test assistant.",
         "C:\\work");
 
     private static AvailableModel Model(string name) => new()
