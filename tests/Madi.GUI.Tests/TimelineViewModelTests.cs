@@ -153,13 +153,14 @@ public sealed class TimelineViewModelTests
                 MaxContextTokens = 1000,
             }],
             new StubAuthentication(),
-            "Helpful assistant.",
             "C:\\work");
         return new MainViewModel(controller, new ImmediateUiDispatcher());
     }
 
     private sealed class StubAgent : IAgent
     {
+        public string SystemInstructions { get; set; } = "Helpful assistant.";
+
         public async IAsyncEnumerable<AgentEvent> RespondAsync(
             Work? work,
             Session session,

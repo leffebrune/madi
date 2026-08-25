@@ -141,12 +141,13 @@ public sealed class TerminalGuiInteractionTests
                 },
             ],
             new Authentication(),
-            "Helpful assistant.",
             path),
         new UtilityInstaller(new NoOpDownloader(), path));
 
     private sealed class EmptyAgent : IAgent
     {
+        public string SystemInstructions { get; set; } = "Helpful assistant.";
+
         public async IAsyncEnumerable<AgentEvent> RespondAsync(
             Work? work,
             Session session,

@@ -67,7 +67,6 @@ internal sealed record SessionDocument
     public DateTimeOffset? CreatedAtUtc { get; init; }
     public DateTimeOffset? UpdatedAtUtc { get; init; }
     public ModelDocument? Model { get; init; }
-    public string Instructions { get; init; } = string.Empty;
 
     public static SessionDocument FromDomain(Session session) => new()
     {
@@ -79,7 +78,6 @@ internal sealed record SessionDocument
         CreatedAtUtc = session.CreatedAtUtc,
         UpdatedAtUtc = session.UpdatedAtUtc,
         Model = ModelDocument.FromDomain(session.Model),
-        Instructions = session.Instructions,
     };
 
     public Session ToDomain(
@@ -98,7 +96,6 @@ internal sealed record SessionDocument
             UpdatedAtUtc = UpdatedAtUtc ?? fallbackUpdatedAtUtc,
             Model = Model?.ToDomain()
                 ?? throw new InvalidDataException($"Session '{Id}' has no model metadata."),
-            Instructions = Instructions,
         };
     }
 }

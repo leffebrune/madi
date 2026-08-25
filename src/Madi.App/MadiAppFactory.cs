@@ -34,7 +34,7 @@ public static class MadiAppFactory
         ISubagentCatalog subagentCatalog = new FileSubagentCatalog(storageRoot);
         var subagentDefinitions = await subagentCatalog.LoadAsync(cancellationToken);
         ISystemPromptCatalog systemPromptCatalog = new FileSystemPromptCatalog(storageRoot);
-        var defaultInstructions = await systemPromptCatalog.LoadAsync(cancellationToken);
+        var systemPrompt = await systemPromptCatalog.LoadAsync(cancellationToken);
 
         var tools = new ToolCatalog(
             workingDirectory,
@@ -53,7 +53,8 @@ public static class MadiAppFactory
             agentTools.Add(new SubagentTool(subagentRunner, subagentDefinitions));
         }
 
-        IAgent agent = new Agent(provider, agentTools);
+        var systemInstructions = SystemInstructionComposer.Compose(systemPrompt, agentTools);
+        IAgent agent = new Agent(provider, systemInstructions, agentTools);
         var defaultModel = new ModelOptions("gpt-5.6-luna", ReasoningEffort.Medium);
         var controller = new MadiController(
             agent,
@@ -61,7 +62,6 @@ public static class MadiAppFactory
             defaultModel,
             availableModels,
             authentication,
-            defaultInstructions,
             workingDirectory);
         var utilityInstaller = new UtilityInstaller(
             new GitHubReleaseFileDownloader(),

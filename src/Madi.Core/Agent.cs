@@ -14,14 +14,28 @@ public sealed class Agent : IAgent
     private readonly IModelProvider _provider;
     private readonly IReadOnlyList<ITool> _tools;
     private readonly IReadOnlyDictionary<string, ITool> _toolsByName;
+    private string _systemInstructions;
 
     public Agent(
         IModelProvider provider,
+        string systemInstructions,
         IReadOnlyList<ITool>? tools = null)
     {
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
+        ArgumentException.ThrowIfNullOrWhiteSpace(systemInstructions);
+        _systemInstructions = systemInstructions;
         _tools = tools ?? [];
         _toolsByName = _tools.ToDictionary(static tool => tool.Name, StringComparer.Ordinal);
+    }
+
+    public string SystemInstructions
+    {
+        get => Volatile.Read(ref _systemInstructions);
+        set
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(value);
+            Volatile.Write(ref _systemInstructions, value);
+        }
     }
 
     public async IAsyncEnumerable<AgentEvent> RespondAsync(
@@ -34,13 +48,9 @@ public sealed class Agent : IAgent
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         ValidateWorkSessionRelationship(work, session);
 
-        if (string.IsNullOrWhiteSpace(session.Instructions))
-        {
-            throw new ArgumentException(
-                "The session's instructions are required.",
-                nameof(session));
-        }
-
+        // Keep a single user turn consistent. Runtime updates apply from the next turn,
+        // including turns on sessions that are already in progress.
+        var systemInstructions = SystemInstructions;
         var pendingConversation = new List<ModelInputItem>(session.Conversation)
         {
             new UserMessage(prompt),
@@ -55,7 +65,7 @@ public sealed class Agent : IAgent
                     pendingConversation,
                     _tools,
                     session.Model,
-                    session.Instructions,
+                    systemInstructions,
                     session.Id,
                     _tools.Any(static tool => tool.SupportsParallelExecution),
                     GetWorkInstructions(work)),

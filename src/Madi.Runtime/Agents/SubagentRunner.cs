@@ -73,13 +73,15 @@ public sealed class SubagentRunner : ISubagentRunner
         try
         {
             var childTools = definition.Tools.Select(toolName => _tools[toolName]).ToArray();
-            IAgent agent = new Agent(_provider, childTools);
+            var systemInstructions = SystemInstructionComposer.Compose(
+                definition.Instructions,
+                childTools);
+            IAgent agent = new Agent(_provider, systemInstructions, childTools);
             var session = new Session
             {
                 Id = $"subagent-{Guid.CreateVersion7()}",
                 Title = $"Subagent: {definition.Name}",
                 Model = definition.ToModelOptions(_availableModels),
-                Instructions = definition.Instructions,
             };
 
             string? result = null;

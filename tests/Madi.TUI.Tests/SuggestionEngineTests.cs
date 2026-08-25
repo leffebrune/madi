@@ -60,6 +60,8 @@ public sealed class SuggestionEngineTests
 
     private sealed class EmptyAgent : IAgent
     {
+        public string SystemInstructions { get; set; } = "Helpful assistant.";
+
         public async IAsyncEnumerable<AgentEvent> RespondAsync(
             Work? work,
             Session session,

@@ -11,8 +11,5 @@ public sealed class Session
 
     public required ModelOptions Model { get; set; }
 
-
-    public string Instructions { get; set; } = "You are a helpful assistant.";
-
     public List<ModelInputItem> Conversation { get; } = [];
 }

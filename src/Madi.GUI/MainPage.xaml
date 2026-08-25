@@ -191,6 +191,7 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="240" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel>
                             <TextBlock Text="{Binding HeaderTitle}" FontSize="20" FontWeight="SemiBold"
@@ -213,6 +214,14 @@
                                 IsEnabled="{Binding CanInteract}"
                                 VerticalAlignment="Bottom"
                                 AutomationProperties.Name="로그인 상태" />
+                        <Button Grid.Column="3"
+                                Click="OnToolsMenu"
+                                IsEnabled="{Binding CanInteract}"
+                                VerticalAlignment="Bottom"
+                                ToolTipService.ToolTip="기타 도구"
+                                AutomationProperties.Name="기타 도구">
+                            <FontIcon Glyph="&#xE712;" />
+                        </Button>
                     </Grid>
                 </Border>
 

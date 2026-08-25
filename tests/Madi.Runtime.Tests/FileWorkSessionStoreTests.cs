@@ -47,6 +47,7 @@ public sealed class FileWorkSessionStoreTests
         Assert.Equal(2, workJson.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Equal(2, sessionJson.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.False(sessionJson.RootElement.TryGetProperty("maxToolRounds", out _));
+        Assert.False(sessionJson.RootElement.TryGetProperty("instructions", out _));
         Assert.Equal(directory.Path, sessionJson.RootElement.GetProperty("workingDirectory").GetString());
     }
 
