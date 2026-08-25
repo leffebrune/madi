@@ -29,7 +29,6 @@ public sealed class FileSubagentCatalogTests
         var scanner = subagents.Single(s => s.Name == "scanner");
         Assert.Equal("OpenAI/gpt-5.6-luna:medium", scanner.Model);
         Assert.Equal(["read", "bash"], scanner.Tools);
-        Assert.Equal(12, scanner.MaxToolRounds);
         Assert.Contains("codebase exploration specialist", scanner.Instructions);
     }
 

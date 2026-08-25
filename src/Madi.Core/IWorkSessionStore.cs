@@ -4,6 +4,8 @@ public sealed record CurrentConversation(Work? Work, Session Session);
 
 public interface IWorkSessionStore
 {
+    // List operations load metadata only. Conversation bodies are loaded explicitly
+    // through LoadCurrentAsync or LoadConversationAsync when a session is opened.
     Task<IReadOnlyList<Work>> LoadWorksAsync(
         CancellationToken cancellationToken = default);
 

@@ -34,6 +34,28 @@ public sealed class TimelineViewModelTests
     }
 
     [Fact]
+    public async Task StreamingDoesNotReenableFollowLatestAfterUserScrollsAway()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.FollowLatest = false;
+
+        await viewModel.ApplyExternalEventAsync(new AppAssistantDelta("답변"));
+
+        Assert.False(viewModel.FollowLatest);
+    }
+
+    [Fact]
+    public async Task NewUserInputReenablesFollowLatest()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.FollowLatest = false;
+
+        await viewModel.ApplyExternalEventAsync(new AppUserInput("새 질문"));
+
+        Assert.True(viewModel.FollowLatest);
+    }
+
+    [Fact]
     public async Task WorkPromptDraftSurvivesUnrelatedBusyStateChanges()
     {
         var viewModel = CreateViewModel();
@@ -74,7 +96,9 @@ public sealed class TimelineViewModelTests
             TotalTokens: 150)));
 
         Assert.Empty(viewModel.Timeline);
-        Assert.Equal("입력 120 · 출력 30 · 합계 150", viewModel.UsageText);
+        Assert.Equal(
+            "입력 120 · 캐시 읽기 80 · 캐시 쓰기 - · 출력 30 · 추론 10 · 합계 150",
+            viewModel.UsageText);
     }
 
     [Fact]

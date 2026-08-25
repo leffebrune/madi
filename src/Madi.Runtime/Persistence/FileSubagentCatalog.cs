@@ -55,7 +55,6 @@ public sealed class FileSubagentCatalog : ISubagentCatalog
             tools:
               - read
               - bash
-            maxToolRounds: 12
             ---
 
             You are a codebase exploration specialist.
@@ -126,7 +125,6 @@ public sealed class FileSubagentCatalog : ISubagentCatalog
                 Description = document.Description ?? string.Empty,
                 Model = document.Model ?? string.Empty,
                 Tools = document.Tools ?? [],
-                MaxToolRounds = document.MaxToolRounds,
                 Instructions = instructions.Trim(),
             };
             definition.Validate();
@@ -173,7 +171,6 @@ internal sealed class SubagentDocument
     public string? Description { get; set; }
     public string? Model { get; set; }
     public List<string>? Tools { get; set; }
-    public int? MaxToolRounds { get; set; }
 }
 
 [YamlStaticContext]

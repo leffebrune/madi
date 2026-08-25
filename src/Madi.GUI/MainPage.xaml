@@ -47,7 +47,7 @@
         </DataTemplate>
 
         <DataTemplate x:Key="TimelineTemplate" x:DataType="presentation:TimelineItemViewModel">
-            <Border MaxWidth="920"
+            <Border Width="1200"
                     Margin="12,5"
                     Padding="14,10"
                     CornerRadius="10"
@@ -136,11 +136,11 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="SidebarColumn" Width="280" MinWidth="180" MaxWidth="520" />
+                <ColumnDefinition x:Name="SidebarColumn" Width="380" MinWidth="180" MaxWidth="520" />
                 <ColumnDefinition Width="6" />
                 <ColumnDefinition Width="*" MinWidth="360" />
                 <ColumnDefinition Width="6" />
-                <ColumnDefinition x:Name="WorkPanelColumn" Width="280" MinWidth="220" MaxWidth="640" />
+                <ColumnDefinition x:Name="WorkPanelColumn" Width="400" MinWidth="220" MaxWidth="640" />
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0"
@@ -235,41 +235,24 @@
                 </StackPanel>
 
                 <Grid Grid.Row="2">
-                    <ListView x:Name="TimelineList"
-                              ItemsSource="{Binding Timeline}"
-                              ItemTemplate="{StaticResource TimelineTemplate}"
-                              SelectionMode="None"
-                              IsItemClickEnabled="False"
-                              IsTabStop="True"
-                              AllowFocusOnInteraction="True"
-                              UseSystemFocusVisuals="False"
-                              PreviewKeyDown="OnTimelinePreviewKeyDown"
-                              HorizontalContentAlignment="Stretch"
-                              AutomationProperties.Name="대화 타임라인">
-                        <ListView.ItemContainerStyle>
-                            <Style TargetType="ListViewItem">
-                                <Setter Property="IsTabStop" Value="False" />
-                                <Setter Property="AllowFocusOnInteraction" Value="False" />
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                <Setter Property="Padding" Value="0" />
-                                <Setter Property="Template">
-                                    <Setter.Value>
-                                        <ControlTemplate TargetType="ListViewItem">
-                                            <ContentPresenter Content="{TemplateBinding Content}"
-                                                              ContentTemplate="{TemplateBinding ContentTemplate}"
-                                                              HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                                              VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
-                                        </ControlTemplate>
-                                    </Setter.Value>
-                                </Setter>
-                            </Style>
-                        </ListView.ItemContainerStyle>
-                        <ListView.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <ItemsStackPanel ItemsUpdatingScrollMode="KeepLastItemInView" />
-                            </ItemsPanelTemplate>
-                        </ListView.ItemsPanel>
-                    </ListView>
+                    <ScrollViewer x:Name="TimelineScroller"
+                                  IsTabStop="True"
+                                  AllowFocusOnInteraction="True"
+                                  UseSystemFocusVisuals="False"
+                                  HorizontalScrollMode="Disabled"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollMode="Enabled"
+                                  VerticalScrollBarVisibility="Auto"
+                                  PreviewKeyDown="OnTimelinePreviewKeyDown"
+                                  ViewChanged="OnTimelineViewChanged"
+                                  AutomationProperties.Name="대화 타임라인">
+                        <ItemsRepeater ItemsSource="{Binding Timeline}"
+                                       ItemTemplate="{StaticResource TimelineTemplate}">
+                            <ItemsRepeater.Layout>
+                                <StackLayout Orientation="Vertical" />
+                            </ItemsRepeater.Layout>
+                        </ItemsRepeater>
+                    </ScrollViewer>
                     <Button x:Name="LatestButton"
                             Content="최신으로 이동"
                             HorizontalAlignment="Center"

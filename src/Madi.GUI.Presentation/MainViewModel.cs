@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text;
 using Madi.App;
+using Madi.Core;
 
 namespace Madi.GUI.Presentation;
 
@@ -318,13 +319,16 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 ApplyNavigation(navigation.Navigation);
                 break;
             case AppConversationLoaded conversation:
+                FollowLatest = true;
                 ApplyConversation(conversation.Conversation);
                 break;
             case AppConversationCleared:
+                FollowLatest = true;
                 Timeline.Clear();
                 UsageText = "사용량 정보 없음";
                 break;
             case AppUserInput user:
+                FollowLatest = true;
                 Timeline.Add(new TimelineItemViewModel(TimelineItemKind.User, user.Text));
                 UsageText = "응답 사용량 계산 중…";
                 Draft = string.Empty;
@@ -386,7 +390,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                     subagent.IsError);
                 break;
             case AppUsageReported usage:
-                UsageText = $"입력 {Format(usage.Usage.InputTokens)} · 출력 {Format(usage.Usage.OutputTokens)} · 합계 {Format(usage.Usage.TotalTokens)}";
+                UsageText = FormatUsage(usage.Usage);
                 return;
             case AppMessage message:
                 var kind = message.Kind switch
@@ -417,7 +421,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 break;
         }
 
-        FollowLatest = true;
         TimelineChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -591,6 +594,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             }
         });
     }
+
+    private static string FormatUsage(ModelUsage usage) =>
+        $"입력 {Format(usage.InputTokens)} · " +
+        $"캐시 읽기 {Format(usage.CachedTokens)} · " +
+        $"캐시 쓰기 {Format(usage.CacheWriteTokens)} · " +
+        $"출력 {Format(usage.OutputTokens)} · " +
+        $"추론 {Format(usage.ReasoningTokens)} · " +
+        $"합계 {Format(usage.TotalTokens)}";
 
     private static string Format(int? value) => value?.ToString("N0") ?? "-";
 
