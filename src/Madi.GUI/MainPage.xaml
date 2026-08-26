@@ -109,7 +109,7 @@
         </DataTemplate>
     </Page.Resources>
 
-    <Grid>
+    <Grid x:Name="RootLayout">
         <Grid x:Name="WorkspacePanel" Padding="40" MaxWidth="760" HorizontalAlignment="Center">
             <StackPanel VerticalAlignment="Center" Spacing="18">
                 <FontIcon Glyph="&#xE8B7;" FontSize="44" HorizontalAlignment="Left" />
@@ -432,6 +432,88 @@
                                HorizontalAlignment="Right"
                                VerticalAlignment="Center"
                                AutomationProperties.Name="토큰 사용량" />
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Grid x:Name="SystemPromptOverlay"
+              Visibility="Collapsed"
+              Background="#99000000"
+              TabFocusNavigation="Cycle"
+              SizeChanged="OnSystemPromptOverlaySizeChanged"
+              KeyDown="OnSystemPromptOverlayKeyDown"
+              AutomationProperties.Name="시스템 프롬프트 대화 상자">
+            <Border x:Name="SystemPromptModal"
+                    Width="960"
+                    Height="680"
+                    Padding="24"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="실제 시스템 프롬프트"
+                               FontSize="20"
+                               FontWeight="SemiBold" />
+                    <TextBlock Grid.Row="1"
+                               Margin="0,8,0,12"
+                               Text="모든 대화에서 모델에 전달되는 현재 Agent instruction입니다. SYSTEM.md와 현재 도구 정보로 생성됩니다."
+                               TextWrapping="Wrap"
+                               Opacity="0.75" />
+                    <TextBox x:Name="SystemPromptBox"
+                             Grid.Row="2"
+                             TextWrapping="Wrap"
+                             AcceptsReturn="True"
+                             IsReadOnly="True"
+                             VerticalContentAlignment="Top"
+                             HorizontalAlignment="Stretch"
+                             VerticalAlignment="Stretch"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             AutomationProperties.Name="실제 시스템 프롬프트 내용" />
+                    <StackPanel Grid.Row="3"
+                                Margin="0,16,0,0"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                Spacing="8">
+                        <Button Content="복사"
+                                MinWidth="80"
+                                Click="OnCopySystemPrompt" />
+                        <Button Content="닫기"
+                                MinWidth="80"
+                                Click="OnCloseSystemPrompt" />
+                    </StackPanel>
+
+                    <primitives:Thumb Grid.RowSpan="4"
+                                      Width="24"
+                                      Height="24"
+                                      Margin="0,0,-18,-18"
+                                      HorizontalAlignment="Right"
+                                      VerticalAlignment="Bottom"
+                                      DragDelta="OnSystemPromptResizeDragDelta"
+                                      IsTabStop="False"
+                                      ToolTipService.ToolTip="드래그하여 창 크기 조절"
+                                      AutomationProperties.Name="시스템 프롬프트 창 크기 조절">
+                        <primitives:Thumb.Template>
+                            <ControlTemplate TargetType="primitives:Thumb">
+                                <Grid Background="Transparent">
+                                    <FontIcon Glyph="&#xE740;"
+                                              FontSize="12"
+                                              Opacity="0.7"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                                </Grid>
+                            </ControlTemplate>
+                        </primitives:Thumb.Template>
+                    </primitives:Thumb>
                 </Grid>
             </Border>
         </Grid>

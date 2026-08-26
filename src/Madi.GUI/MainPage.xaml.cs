@@ -17,6 +17,7 @@ public sealed partial class MainPage : Page
     private readonly ObservableCollection<string> _recentWorkspaces = [];
     private MainViewModel? _viewModel;
     private CancellationTokenSource? _workspaceCancellation;
+    private Control? _systemPromptPreviousFocus;
     private bool _isTimelineScrollPending;
     private bool _isAutoScrollingTimeline;
 
@@ -547,56 +548,77 @@ public sealed partial class MainPage : Page
         menu.ShowAt(button);
     }
 
-    private async void OnShowSystemPrompt(object sender, RoutedEventArgs e)
+    private void OnShowSystemPrompt(object sender, RoutedEventArgs e)
     {
         if (_viewModel is null)
         {
             return;
         }
 
-        var prompt = _viewModel.SystemInstructions;
-        var content = new Grid
-        {
-            Width = Math.Clamp(ActualWidth - 160, 400, 760),
-            Height = Math.Clamp(ActualHeight - 180, 300, 520),
-            RowSpacing = 8,
-        };
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        _systemPromptPreviousFocus = FocusManager.GetFocusedElement(XamlRoot) as Control;
+        SystemPromptBox.Text = _viewModel.SystemInstructions;
+        SystemPromptOverlay.Visibility = Visibility.Visible;
+        ResizeSystemPromptModal(
+            Math.Min(960, Math.Max(400, RootLayout.ActualWidth - 64)),
+            Math.Min(680, Math.Max(300, RootLayout.ActualHeight - 64)));
+        DispatcherQueue.TryEnqueue(() => SystemPromptBox.Focus(FocusState.Programmatic));
+    }
 
-        content.Children.Add(new TextBlock
-        {
-            Text = "모든 대화에서 모델에 전달되는 현재 Agent instruction입니다. SYSTEM.md와 현재 도구 정보로 생성됩니다.",
-            TextWrapping = TextWrapping.Wrap,
-        });
-        var promptBox = new TextBox
-        {
-            Text = prompt,
-            IsReadOnly = true,
-            AcceptsReturn = true,
-            TextWrapping = TextWrapping.NoWrap,
-        };
-        ScrollViewer.SetHorizontalScrollBarVisibility(promptBox, ScrollBarVisibility.Auto);
-        ScrollViewer.SetVerticalScrollBarVisibility(promptBox, ScrollBarVisibility.Auto);
-        Grid.SetRow(promptBox, 1);
-        content.Children.Add(promptBox);
+    private void OnCopySystemPrompt(object sender, RoutedEventArgs e)
+    {
+        var package = new DataPackage();
+        package.SetText(SystemPromptBox.Text);
+        Clipboard.SetContent(package);
+    }
 
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = "실제 시스템 프롬프트",
-            Content = content,
-            PrimaryButtonText = "복사",
-            CloseButtonText = "닫기",
-            DefaultButton = ContentDialogButton.Close,
-        };
+    private void OnCloseSystemPrompt(object sender, RoutedEventArgs e) => CloseSystemPrompt();
 
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+    private void OnSystemPromptOverlayKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Escape)
         {
-            var package = new DataPackage();
-            package.SetText(prompt);
-            Clipboard.SetContent(package);
+            return;
         }
+
+        CloseSystemPrompt();
+        e.Handled = true;
+    }
+
+    private void CloseSystemPrompt()
+    {
+        SystemPromptOverlay.Visibility = Visibility.Collapsed;
+
+        var previousFocus = _systemPromptPreviousFocus;
+        _systemPromptPreviousFocus = null;
+        if (previousFocus is not null)
+        {
+            DispatcherQueue.TryEnqueue(() => previousFocus.Focus(FocusState.Programmatic));
+        }
+    }
+
+    private void OnSystemPromptResizeDragDelta(object sender, DragDeltaEventArgs e) =>
+        ResizeSystemPromptModal(
+            SystemPromptModal.ActualWidth + e.HorizontalChange,
+            SystemPromptModal.ActualHeight + e.VerticalChange);
+
+    private void OnSystemPromptOverlaySizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (SystemPromptOverlay.Visibility == Visibility.Visible)
+        {
+            ResizeSystemPromptModal(SystemPromptModal.ActualWidth, SystemPromptModal.ActualHeight);
+        }
+    }
+
+    private void ResizeSystemPromptModal(double requestedWidth, double requestedHeight)
+    {
+        const double overlayMargin = 32;
+        var maximumWidth = Math.Max(1, RootLayout.ActualWidth - overlayMargin);
+        var maximumHeight = Math.Max(1, RootLayout.ActualHeight - overlayMargin);
+        var minimumWidth = Math.Min(400, maximumWidth);
+        var minimumHeight = Math.Min(300, maximumHeight);
+
+        SystemPromptModal.Width = Math.Clamp(requestedWidth, minimumWidth, maximumWidth);
+        SystemPromptModal.Height = Math.Clamp(requestedHeight, minimumHeight, maximumHeight);
     }
 
     private async void OnToggleAuthentication(object sender, RoutedEventArgs e)
