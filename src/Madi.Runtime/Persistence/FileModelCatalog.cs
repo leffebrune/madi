@@ -50,6 +50,10 @@ public sealed class FileModelCatalog : IModelCatalog
         {
             await SaveAsync(providers, cancellationToken);
         }
+        else
+        {
+            RestrictFilePermissions();
+        }
 
         return models;
     }
@@ -64,6 +68,18 @@ public sealed class FileModelCatalog : IModelCatalog
             providers,
             ModelCatalogJsonContext.Default.ListModelProviderDocument,
             cancellationToken);
+        await output.FlushAsync(cancellationToken);
+        RestrictFilePermissions();
+    }
+
+    private void RestrictFilePermissions()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                _path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
     }
 
     private static bool IsLegacyFormat(JsonElement root)

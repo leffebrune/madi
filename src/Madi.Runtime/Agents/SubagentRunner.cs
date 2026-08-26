@@ -1,4 +1,5 @@
 using Madi.Core;
+using Madi.Runtime.Providers;
 using Madi.Runtime.Tools;
 
 namespace Madi.Runtime.Agents;
@@ -72,6 +73,18 @@ public sealed class SubagentRunner : ISubagentRunner
         await _concurrencyGate.WaitAsync(cancellationToken);
         try
         {
+            var model = definition.ToModelOptions(_availableModels);
+            if (_provider is IModelProviderRuntime runtime)
+            {
+                var authentication = await runtime.GetAuthenticationAsync(model, cancellationToken);
+                if (authentication.Status == ModelAuthenticationStatus.ActionRequired)
+                {
+                    throw new InvalidOperationException(
+                        authentication.Message
+                        ?? $"Subagent '{definition.Name}'의 모델 인증이 필요합니다.");
+                }
+            }
+
             var childTools = definition.Tools.Select(toolName => _tools[toolName]).ToArray();
             var systemInstructions = SystemInstructionComposer.Compose(
                 definition.Instructions,
@@ -81,7 +94,7 @@ public sealed class SubagentRunner : ISubagentRunner
             {
                 Id = $"subagent-{Guid.CreateVersion7()}",
                 Title = $"Subagent: {definition.Name}",
-                Model = definition.ToModelOptions(_availableModels),
+                Model = model,
             };
 
             string? result = null;

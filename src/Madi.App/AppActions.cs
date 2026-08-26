@@ -18,6 +18,8 @@ public sealed record ActivateSessionAction(string SessionId) : AppAction;
 
 public sealed record DeleteSessionAction(string SessionId) : AppAction;
 
+public sealed record DeleteWorkAction(string WorkId) : AppAction;
+
 public sealed record LoginAction : AppAction;
 
 public sealed record LogoutAction : AppAction;

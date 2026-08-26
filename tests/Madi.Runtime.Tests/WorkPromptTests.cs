@@ -57,6 +57,30 @@ public sealed class WorkPromptTests
     }
 
     [Fact]
+    public async Task AgentReportsApiAndToolDurations()
+    {
+        var provider = new TimedToolProvider();
+        var agent = new Agent(provider, "instructions", [new TimedTool()]);
+        var session = new Session
+        {
+            Id = "session-1",
+            Model = new ModelOptions("test"),
+        };
+        var events = new List<AgentEvent>();
+
+        await foreach (var item in agent.RespondAsync(null, session, "도구 실행"))
+        {
+            events.Add(item);
+        }
+
+        var tool = Assert.Single(events.OfType<AgentToolExecutionCompleted>());
+        Assert.True(tool.ApiDuration >= TimeSpan.FromMilliseconds(20));
+        Assert.True(tool.ToolDuration >= TimeSpan.FromMilliseconds(20));
+        var answer = Assert.Single(events.OfType<AgentResponseCompleted>());
+        Assert.True(answer.ApiDuration >= TimeSpan.FromMilliseconds(20));
+    }
+
+    [Fact]
     public async Task OpenAIProviderWritesWorkPromptAsFirstDeveloperInput()
     {
         var provider = new OpenAIOAuthProvider(new CompletingNetworkClient());
@@ -101,6 +125,59 @@ public sealed class WorkPromptTests
             Requests.Add(request);
             await Task.CompletedTask;
             yield return new ModelResponseCompleted(new ModelResponse("response-1", "완료", []));
+        }
+    }
+
+    private sealed class TimedToolProvider : IModelProvider
+    {
+        private int _requestCount;
+
+        public string Id => "timed-test";
+
+        public async IAsyncEnumerable<ModelEvent> StreamAsync(
+            ModelRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(40, cancellationToken);
+            if (Interlocked.Increment(ref _requestCount) == 1)
+            {
+                var call = new ModelToolCall(
+                    Id,
+                    "call-1",
+                    "timed",
+                    "{}",
+                    "{}");
+                yield return new ModelOutputItemCompleted(call);
+                yield return new ModelResponseCompleted(new ModelResponse(
+                    "response-1",
+                    string.Empty,
+                    [call]));
+                yield break;
+            }
+
+            yield return new ModelTextDelta("완료");
+            yield return new ModelResponseCompleted(new ModelResponse(
+                "response-2",
+                "완료",
+                [new ModelAssistantOutput(Id, "완료", "{}") ]));
+        }
+    }
+
+    private sealed class TimedTool : ITool
+    {
+        private static readonly JsonElement EmptyParameters =
+            JsonDocument.Parse("{}").RootElement.Clone();
+
+        public string Name => "timed";
+        public string Description => "timed test tool";
+        public JsonElement Parameters => EmptyParameters;
+
+        public async Task<string> ExecuteAsync(
+            JsonElement arguments,
+            CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(40, cancellationToken);
+            return "done";
         }
     }
 

@@ -6,6 +6,7 @@ internal sealed record ModelProviderDocument
 {
     public string Provider { get; init; } = string.Empty;
     public string? BaseUrl { get; init; }
+    public string? ApiKey { get; init; }
     public string Api { get; init; } = string.Empty;
     public List<ModelEntryDocument> Models { get; init; } = [];
 
@@ -40,6 +41,7 @@ internal sealed record ModelEntryDocument
             Provider = provider.Provider,
             Api = provider.Api,
             BaseUrl = provider.BaseUrl,
+            ApiKey = provider.ApiKey,
             SupportsReasoning = SupportsReasoning,
             MaxContextTokens = MaxContextTokens,
             MaxOutputTokens = MaxOutputTokens,

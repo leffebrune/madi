@@ -33,10 +33,10 @@
                         Width="28"
                         Height="28"
                         Padding="0"
-                        Click="OnSessionMenuClick"
-                        Visibility="{Binding IsHeader, Converter={StaticResource InverseBoolToVisibility}}"
-                        ToolTipService.ToolTip="대화 메뉴"
-                        AutomationProperties.Name="대화 메뉴">
+                        Click="OnNavigationMenuClick"
+                        Visibility="{Binding HasMenu, Converter={StaticResource BoolToVisibility}}"
+                        ToolTipService.ToolTip="항목 메뉴"
+                        AutomationProperties.Name="항목 메뉴">
                     <FontIcon Glyph="&#xE712;" FontSize="12" />
                 </Button>
             </Grid>
@@ -57,13 +57,25 @@
                     <TextBlock Text="{Binding RoleLabel}"
                                FontWeight="SemiBold"
                                Visibility="{Binding ShowsRoleLabel, Converter={StaticResource BoolToVisibility}}" />
-                    <Button Content="원문 복사"
-                            Padding="8,2"
-                            HorizontalAlignment="Right"
-                            Click="OnCopyAssistantMarkdown"
-                            Visibility="{Binding IsAssistant, Converter={StaticResource BoolToVisibility}}"
-                            ToolTipService.ToolTip="Markdown 원문 복사"
-                            AutomationProperties.Name="Markdown 원문 복사" />
+                    <Grid ColumnSpacing="8"
+                          HorizontalAlignment="Right"
+                          Visibility="{Binding IsAssistant, Converter={StaticResource BoolToVisibility}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding TimingText}"
+                                   FontSize="12"
+                                   Opacity="0.65"
+                                   VerticalAlignment="Center"
+                                   Visibility="{Binding HasTiming, Converter={StaticResource BoolToVisibility}}" />
+                        <Button Grid.Column="1"
+                                Content="원문 복사"
+                                Padding="8,2"
+                                Click="OnCopyAssistantMarkdown"
+                                ToolTipService.ToolTip="Markdown 원문 복사"
+                                AutomationProperties.Name="Markdown 원문 복사" />
+                    </Grid>
                     <local:MarkdownView Markdown="{Binding Text}"
                                         Visibility="{Binding IsActivity, Converter={StaticResource InverseBoolToVisibility}}" />
                     <Grid ColumnSpacing="6"
@@ -73,6 +85,7 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <ProgressRing Width="14"
@@ -89,7 +102,14 @@
                                    Text="{Binding Description}"
                                    TextWrapping="Wrap"
                                    IsTextSelectionEnabled="True" />
-                        <Button Grid.Column="4"
+                        <TextBlock Grid.Column="4"
+                                   Margin="6,0,0,0"
+                                   Text="{Binding TimingText}"
+                                   FontSize="12"
+                                   Opacity="0.65"
+                                   VerticalAlignment="Center"
+                                   Visibility="{Binding HasTiming, Converter={StaticResource BoolToVisibility}}" />
+                        <Button Grid.Column="5"
                                 Content="{Binding ActivityToggleLabel}"
                                 Padding="8,2"
                                 VerticalAlignment="Top"
@@ -201,8 +221,8 @@
                         </StackPanel>
                         <ComboBox x:Name="ModelSelector" Grid.Column="1"
                                   ItemsSource="{Binding Models}"
-                                  DisplayMemberPath="Name"
-                                  SelectedValuePath="Name"
+                                  DisplayMemberPath="DisplayName"
+                                  SelectedValuePath="Key"
                                   SelectedValue="{Binding SelectedModelName, Mode=OneWay}"
                                   SelectionChanged="OnModelSelectionChanged"
                                   IsEnabled="{Binding CanInteract}"
@@ -211,7 +231,7 @@
                         <Button Grid.Column="2"
                                 Content="{Binding AuthenticationLabel}"
                                 Click="OnToggleAuthentication"
-                                IsEnabled="{Binding CanInteract}"
+                                IsEnabled="{Binding CanToggleAuthentication}"
                                 VerticalAlignment="Bottom"
                                 AutomationProperties.Name="로그인 상태" />
                         <Button Grid.Column="3"

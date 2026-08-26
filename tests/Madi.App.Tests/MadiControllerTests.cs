@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using Madi.App;
 using Madi.Core;
 using Madi.Runtime.Authentication;
+using Madi.Runtime.Providers;
 using Madi.Services;
 
 namespace Madi.App.Tests;
@@ -112,8 +113,14 @@ public sealed class MadiControllerTests
             [
                 new AgentTextDelta("답"),
                 new AgentToolCallCompleted("call-1", "read", "{\"path\":\"한글.txt\"}"),
-                new AgentToolExecutionCompleted("call-1", "read", "파일 결과", false),
-                new AgentResponseCompleted("답변"),
+                new AgentToolExecutionCompleted(
+                    "call-1",
+                    "read",
+                    "파일 결과",
+                    false,
+                    TimeSpan.FromMilliseconds(100),
+                    TimeSpan.FromMilliseconds(200)),
+                new AgentResponseCompleted("답변", TimeSpan.FromMilliseconds(300)),
             ];
         });
         var controller = CreateController(agent, store);
@@ -122,7 +129,12 @@ public sealed class MadiControllerTests
 
         var completed = Assert.Single(events.OfType<AppToolCompleted>());
         Assert.Equal("파일 결과", completed.Result);
+        Assert.Equal(TimeSpan.FromMilliseconds(100), completed.ToolDuration);
+        Assert.Equal(TimeSpan.FromMilliseconds(200), completed.ApiDuration);
         Assert.Contains("한글.txt", completed.Arguments, StringComparison.Ordinal);
+        Assert.Equal(
+            TimeSpan.FromMilliseconds(300),
+            Assert.Single(events.OfType<AppAssistantCompleted>()).ApiDuration);
         Assert.Contains(events, item => item is AppTurnCompleted { Succeeded: true });
         Assert.Single(store.AppendStartIndices);
         Assert.Equal(2, store.LastSavedSession?.Conversation.Count);
@@ -217,6 +229,102 @@ public sealed class MadiControllerTests
     }
 
     [Fact]
+    public async Task ApiKeyModelInitializationDoesNotReadOAuthCredentials()
+    {
+        var authentication = new StubAuthentication();
+        var apiModel = new AvailableModel
+        {
+            Name = "api-model",
+            Provider = "OpenAI API",
+            Api = OpenAIResponseProvider.ProviderId,
+            BaseUrl = "https://api.openai.com/v1",
+            ApiKey = "sk-test-key",
+            MaxContextTokens = 1000,
+        };
+        var runtime = new CatalogModelProvider([apiModel], authentication);
+        var controller = new MadiController(
+            new StubAgent(static (_, _) => Task.FromResult<IReadOnlyList<AgentEvent>>([])),
+            new RecordingStore(),
+            new ModelOptions(apiModel.Name, Provider: apiModel.Provider),
+            [apiModel],
+            runtime,
+            "C:\\work");
+
+        await controller.InitializeAsync();
+
+        Assert.Equal(AuthenticationKind.ApiKey, controller.State.AuthenticationKind);
+        Assert.Equal(AuthenticationState.Ready, controller.State.Authentication);
+        Assert.Equal(0, authentication.AuthorizationCount);
+    }
+
+    [Fact]
+    public async Task MissingApiKeyBlocksPromptBeforeCallingAgent()
+    {
+        var calls = 0;
+        var apiModel = new AvailableModel
+        {
+            Name = "api-model",
+            Provider = "OpenAI API",
+            Api = OpenAIResponseProvider.ProviderId,
+            BaseUrl = "https://api.openai.com/v1",
+            MaxContextTokens = 1000,
+        };
+        var runtime = new CatalogModelProvider([apiModel], new StubAuthentication());
+        var controller = new MadiController(
+            new StubAgent((_, _) =>
+            {
+                calls++;
+                return Task.FromResult<IReadOnlyList<AgentEvent>>([]);
+            }),
+            new RecordingStore(),
+            new ModelOptions(apiModel.Name, Provider: apiModel.Provider),
+            [apiModel],
+            runtime,
+            "C:\\work");
+
+        var events = await CollectAsync(controller.ExecuteAsync("질문"));
+
+        Assert.Equal(0, calls);
+        Assert.Contains(events.OfType<AppMessage>(), message =>
+            message.Kind == AppMessageKind.Error
+            && message.Text.Contains("apiKey", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AppFactoryUsesCatalogAuthenticationForApiKeyDefaultModel()
+    {
+        using var directory = new TemporaryDirectory();
+        await File.WriteAllTextAsync(
+            Path.Combine(directory.Path, "models.json"),
+            """
+            [
+              {
+                "provider": "OpenAI API",
+                "api": "openai-response",
+                "baseUrl": "https://api.openai.com/v1",
+                "apiKey": "sk-test-key",
+                "models": [
+                  {
+                    "name": "api-model",
+                    "supportsReasoning": true,
+                    "maxContextTokens": 1000
+                  }
+                ]
+              }
+            ]
+            """);
+
+        var host = await MadiAppFactory.CreateAsync(
+            storageRoot: directory.Path,
+            workingDirectory: directory.Path);
+        await host.Controller.InitializeAsync();
+
+        Assert.Equal("OpenAI API/api-model", host.Controller.State.Model.QualifiedName);
+        Assert.Equal(AuthenticationKind.ApiKey, host.Controller.State.AuthenticationKind);
+        Assert.Equal(AuthenticationState.Ready, host.Controller.State.Authentication);
+    }
+
+    [Fact]
     public async Task HelloArgumentIsUnknownAndUsageNoLongerAdvertisesIt()
     {
         using var directory = new TemporaryDirectory();
@@ -251,6 +359,109 @@ public sealed class MadiControllerTests
         Assert.Equal(
             commandEvents.OfType<AppTurnCompleted>().Last(),
             actionEvents.OfType<AppTurnCompleted>().Last());
+    }
+
+    [Fact]
+    public async Task ProviderChangeInActiveConversationIsRejectedAndRestoresState()
+    {
+        var oauthModel = new AvailableModel
+        {
+            Name = "oauth-model",
+            Provider = "OpenAI OAuth",
+            Api = OpenAIOAuthProvider.ProviderId,
+            MaxContextTokens = 1000,
+        };
+        var apiModel = new AvailableModel
+        {
+            Name = "api-model",
+            Provider = "OpenAI API",
+            Api = OpenAIResponseProvider.ProviderId,
+            BaseUrl = "https://api.openai.com/v1",
+            ApiKey = "sk-test-key",
+            MaxContextTokens = 1000,
+        };
+        var now = DateTimeOffset.UtcNow;
+        var session = Session("session-1", "대화", null, "C:\\work", now);
+        session.Model = new ModelOptions(oauthModel.Name, Provider: oauthModel.Provider);
+        session.Conversation.Add(new UserMessage("existing"));
+        var store = new RecordingStore
+        {
+            Current = new CurrentConversation(null, session),
+        };
+        store.Sessions.Add(session);
+        var authentication = new StubAuthentication();
+        var runtime = new CatalogModelProvider(
+            [oauthModel, apiModel],
+            authentication);
+        var controller = new MadiController(
+            new StubAgent(static (_, _) => Task.FromResult<IReadOnlyList<AgentEvent>>([])),
+            store,
+            session.Model,
+            [oauthModel, apiModel],
+            runtime,
+            "C:\\work");
+
+        var events = await CollectAsync(controller.ExecuteAsync(
+            new SelectModelAction(apiModel.QualifiedName)));
+
+        Assert.Equal(oauthModel.QualifiedName, controller.State.Model.QualifiedName);
+        Assert.Contains(events, item => item is AppMessage { Kind: AppMessageKind.Warning });
+        Assert.All(
+            events.OfType<AppStateChanged>(),
+            stateChanged => Assert.Equal(
+                oauthModel.QualifiedName,
+                stateChanged.State.Model.QualifiedName));
+        Assert.Contains(events, item => item is AppTurnCompleted { Succeeded: false });
+    }
+
+    [Fact]
+    public async Task LegacySessionInfersProviderFromPersistedOutputWhenModelNameIsAmbiguous()
+    {
+        var oauthModel = new AvailableModel
+        {
+            Name = "shared",
+            Provider = "OpenAI OAuth",
+            Api = OpenAIOAuthProvider.ProviderId,
+            MaxContextTokens = 1000,
+        };
+        var apiModel = new AvailableModel
+        {
+            Name = "shared",
+            Provider = "OpenAI API",
+            Api = OpenAIResponseProvider.ProviderId,
+            BaseUrl = "https://api.openai.com/v1",
+            ApiKey = "sk-test-key",
+            MaxContextTokens = 1000,
+        };
+        var now = DateTimeOffset.UtcNow;
+        var session = Session("legacy", "기존 대화", null, "C:\\work", now);
+        session.Model = new ModelOptions("shared");
+        session.Conversation.Add(new ModelAssistantOutput(
+            OpenAIResponseProvider.ProviderId,
+            "answer",
+            "{\"type\":\"message\",\"content\":[]}"));
+        var store = new RecordingStore
+        {
+            Current = new CurrentConversation(null, session),
+        };
+        store.Sessions.Add(session);
+        var authentication = new StubAuthentication();
+        var runtime = new CatalogModelProvider(
+            [oauthModel, apiModel],
+            authentication);
+        var controller = new MadiController(
+            new StubAgent(static (_, _) => Task.FromResult<IReadOnlyList<AgentEvent>>([])),
+            store,
+            new ModelOptions(oauthModel.Name, Provider: oauthModel.Provider),
+            [oauthModel, apiModel],
+            runtime,
+            "C:\\work");
+
+        await controller.InitializeAsync();
+
+        Assert.Equal(apiModel.QualifiedName, controller.State.Model.QualifiedName);
+        Assert.Equal(apiModel.Provider, store.LastSavedSession?.Model.Provider);
+        Assert.Equal(0, authentication.AuthorizationCount);
     }
 
     [Fact]
@@ -328,6 +539,90 @@ public sealed class MadiControllerTests
         Assert.Single(cleared.OfType<AppConversationCleared>());
         Assert.Empty(store.Sessions);
         Assert.Empty((await controller.GetNavigationAsync()).Works[0].Sessions);
+    }
+
+    [Fact]
+    public async Task DeleteWorkRemovesChildConversationsAndSelectsOutsideReplacement()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var child = Session("child", "삭제될 대화", "work-1", "C:\\work", now);
+        var replacement = Session("replacement", "남을 대화", null, "C:\\work", now.AddMinutes(-1));
+        var work = new Work
+        {
+            Id = "work-1",
+            Title = "삭제할 Work",
+            WorkingDirectory = "C:\\work",
+            CreatedAtUtc = now.AddMinutes(-2),
+            UpdatedAtUtc = now,
+        };
+        work.Sessions.Add(child);
+        var store = new RecordingStore
+        {
+            Current = new CurrentConversation(work, child),
+        };
+        store.Works.Add(work);
+        store.Sessions.AddRange([child, replacement]);
+        var controller = CreateController(store: store);
+
+        var events = await CollectAsync(
+            controller.ExecuteAsync(new DeleteWorkAction(work.Id)));
+
+        Assert.DoesNotContain(store.Works, item => item.Id == work.Id);
+        Assert.DoesNotContain(store.Sessions, item => item.WorkId == work.Id);
+        Assert.Equal(replacement.Id, controller.State.Session?.Id);
+        Assert.Null(controller.State.Work);
+        Assert.Equal(replacement.Id,
+            Assert.Single(events.OfType<AppConversationLoaded>()).Conversation.Session.Id);
+        Assert.Empty((await controller.GetNavigationAsync()).Works);
+    }
+
+    [Fact]
+    public async Task DeleteCurrentWorkWithoutReplacementClearsConversation()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var child = Session("only-child", "유일한 대화", "work-1", "C:\\work", now);
+        var work = new Work
+        {
+            Id = "work-1",
+            Title = "유일한 Work",
+            WorkingDirectory = "C:\\work",
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+        };
+        var store = new RecordingStore
+        {
+            Current = new CurrentConversation(work, child),
+        };
+        store.Works.Add(work);
+        store.Sessions.Add(child);
+        var controller = CreateController(store: store);
+
+        var events = await CollectAsync(controller.ExecuteAsync(new DeleteWorkAction(work.Id)));
+
+        Assert.Null(controller.State.Work);
+        Assert.Null(controller.State.Session);
+        Assert.Single(events.OfType<AppConversationCleared>());
+        Assert.Empty(store.Works);
+        Assert.Empty(store.Sessions);
+    }
+
+    [Fact]
+    public async Task DeleteWorkRejectsAWorkFromAnotherWorkspace()
+    {
+        var work = new Work
+        {
+            Id = "other-work",
+            Title = "다른 폴더",
+            WorkingDirectory = "C:\\other",
+        };
+        var store = new RecordingStore();
+        store.Works.Add(work);
+        var controller = CreateController(store: store);
+
+        var events = await CollectAsync(controller.ExecuteAsync(new DeleteWorkAction(work.Id)));
+
+        Assert.Contains(events, item => item is AppTurnCompleted { Succeeded: false });
+        Assert.Contains(store.Works, item => item.Id == work.Id);
     }
 
     [Fact]
@@ -478,6 +773,23 @@ public sealed class MadiControllerTests
             }
             return Task.FromResult(removed);
         }
+        public Task<bool> DeleteWorkAsync(
+            string workId,
+            CancellationToken cancellationToken = default)
+        {
+            if (!Works.Any(item => item.Id == workId))
+            {
+                return Task.FromResult(false);
+            }
+
+            Works.RemoveAll(item => item.Id == workId);
+            Sessions.RemoveAll(item => item.WorkId == workId);
+            if (Current?.Work?.Id == workId)
+            {
+                Current = null;
+            }
+            return Task.FromResult(true);
+        }
         public Task SetCurrentAsync(Session session, CancellationToken cancellationToken = default)
         {
             SetCurrentCount++;
@@ -492,13 +804,17 @@ public sealed class MadiControllerTests
     {
         public Exception? LoginFailure { get; init; }
         public bool WaitForCancellation { get; init; }
+        public int AuthorizationCount { get; private set; }
         public int LoginCount { get; private set; }
         public int LogoutCount { get; private set; }
         public TaskCompletionSource LoginStarted { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public Task<string> GetAuthorizationAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult("token");
+        public Task<string> GetAuthorizationAsync(CancellationToken cancellationToken = default)
+        {
+            AuthorizationCount++;
+            return Task.FromResult("token");
+        }
 
         public async Task LoginAsync(CancellationToken cancellationToken = default)
         {

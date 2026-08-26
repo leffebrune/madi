@@ -23,6 +23,8 @@ public sealed class TimelineItemViewModel : ObservableObject
     private bool _isRunning;
     private bool _isError;
     private bool _isActivityExpanded;
+    private TimeSpan? _toolDuration;
+    private TimeSpan? _apiDuration;
 
     public TimelineItemViewModel(
         TimelineItemKind kind,
@@ -62,6 +64,23 @@ public sealed class TimelineItemViewModel : ObservableObject
         or TimelineItemKind.Error;
     public bool ShowsStandaloneDetails => HasDetails && !IsActivity;
     public string ActivityToggleLabel => IsActivityExpanded ? "접기" : "펼치기";
+    public bool HasTiming => ApiDuration is not null || ToolDuration is not null;
+    public string TimingText
+    {
+        get
+        {
+            var parts = new List<string>(2);
+            if (ToolDuration is { } toolDuration)
+            {
+                parts.Add($"도구 {FormatDuration(toolDuration)}");
+            }
+            if (ApiDuration is { } apiDuration)
+            {
+                parts.Add($"API {FormatDuration(apiDuration)}");
+            }
+            return string.Join(" · ", parts);
+        }
+    }
 
     public string Text
     {
@@ -111,6 +130,48 @@ public sealed class TimelineItemViewModel : ObservableObject
         get => _isError;
         set => SetProperty(ref _isError, value);
     }
+
+    public TimeSpan? ToolDuration
+    {
+        get => _toolDuration;
+        set
+        {
+            if (SetProperty(ref _toolDuration, value))
+            {
+                OnTimingChanged();
+            }
+        }
+    }
+
+    public TimeSpan? ApiDuration
+    {
+        get => _apiDuration;
+        set
+        {
+            if (SetProperty(ref _apiDuration, value))
+            {
+                OnTimingChanged();
+            }
+        }
+    }
+
+    private void OnTimingChanged()
+    {
+        OnPropertyChanged(nameof(HasTiming));
+        OnPropertyChanged(nameof(TimingText));
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        if (duration.TotalMinutes >= 1)
+        {
+            return $"{(int)duration.TotalMinutes}분 {duration.Seconds + duration.Milliseconds / 1000d:0.#}초";
+        }
+
+        return duration.TotalSeconds >= 1
+            ? $"{duration.TotalSeconds:0.##}초"
+            : $"{Math.Max(0, duration.TotalMilliseconds):0}ms";
+    }
 }
 
 public sealed record NavigationItemViewModel(
@@ -119,11 +180,18 @@ public sealed record NavigationItemViewModel(
     string? WorkId,
     int Indent,
     bool IsHeader,
-    bool IsActive = false);
+    bool IsActive = false)
+{
+    public bool HasMenu => SessionId is not null || (IsHeader && WorkId is not null);
+}
 
 public sealed record SuggestionItemViewModel(string CompletionText, string DisplayText);
 
 public sealed record ModelItemViewModel(
     string Name,
     string Provider,
-    int MaxContextTokens);
+    int MaxContextTokens)
+{
+    public string Key => $"{Provider}/{Name}";
+    public string DisplayName => Key;
+}

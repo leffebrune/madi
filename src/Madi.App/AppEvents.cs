@@ -18,6 +18,10 @@ public sealed record AppUserInput(string Text) : AppEvent;
 
 public sealed record AppAssistantDelta(string Text) : AppEvent;
 
+public sealed record AppAssistantCompleted(
+    TimeSpan ApiDuration,
+    string Text = "") : AppEvent;
+
 public sealed record AppToolStarted(
     string CallId,
     string Name,
@@ -28,7 +32,9 @@ public sealed record AppToolCompleted(
     string Name,
     string Arguments,
     string Result,
-    bool IsError) : AppEvent;
+    bool IsError,
+    TimeSpan ToolDuration = default,
+    TimeSpan ApiDuration = default) : AppEvent;
 
 public sealed record AppSubagentStarted(
     string CallId,
@@ -40,7 +46,9 @@ public sealed record AppSubagentCompleted(
     string Name,
     string Prompt,
     string Response,
-    bool IsError) : AppEvent;
+    bool IsError,
+    TimeSpan ToolDuration = default,
+    TimeSpan ApiDuration = default) : AppEvent;
 
 public sealed record AppUsageReported(ModelUsage Usage) : AppEvent;
 

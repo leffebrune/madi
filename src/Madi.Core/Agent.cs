@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 
@@ -59,6 +60,7 @@ public sealed class Agent : IAgent
         for (var round = 0; round < MaxToolRounds; round++)
         {
             ModelResponse? response = null;
+            var apiStopwatch = Stopwatch.StartNew();
 
             await foreach (var item in _provider.StreamAsync(
                 new ModelRequest(
@@ -82,21 +84,14 @@ public sealed class Agent : IAgent
                     case ModelTextDelta delta:
                         yield return new AgentTextDelta(delta.Text);
                         break;
-                    case ModelOutputItemCompleted completed
-                        when completed.Item is ModelToolCall toolCall:
-                        if (!IsSubagentTool(toolCall.Name))
-                        {
-                            yield return new AgentToolCallCompleted(
-                                toolCall.CallId,
-                                toolCall.Name,
-                                toolCall.Arguments);
-                        }
-                        break;
                     case ModelResponseCompleted completed:
                         response = completed.Response;
                         break;
                 }
             }
+
+            apiStopwatch.Stop();
+            var apiDuration = apiStopwatch.Elapsed;
 
             if (response is null)
             {
@@ -111,11 +106,27 @@ public sealed class Agent : IAgent
 
             pendingConversation.AddRange(response.Output);
             var toolCalls = response.Output.OfType<ModelToolCall>().ToArray();
+            if (toolCalls.Length > 0)
+            {
+                if (!string.IsNullOrEmpty(response.OutputText))
+                {
+                    yield return new AgentAssistantCompleted(response.OutputText, apiDuration);
+                }
+
+                foreach (var toolCall in toolCalls.Where(call => !IsSubagentTool(call.Name)))
+                {
+                    yield return new AgentToolCallCompleted(
+                        toolCall.CallId,
+                        toolCall.Name,
+                        toolCall.Arguments);
+                }
+            }
+
             if (toolCalls.Length == 0)
             {
                 session.Conversation.Clear();
                 session.Conversation.AddRange(pendingConversation);
-                yield return new AgentResponseCompleted(response.OutputText);
+                yield return new AgentResponseCompleted(response.OutputText, apiDuration);
                 yield break;
             }
 
@@ -158,7 +169,9 @@ public sealed class Agent : IAgent
                             execution.Call.CallId,
                             subagentName,
                             result.Output,
-                            result.IsError);
+                            result.IsError,
+                            result.Duration,
+                            apiDuration);
                     }
                     else
                     {
@@ -166,7 +179,9 @@ public sealed class Agent : IAgent
                             execution.Call.CallId,
                             execution.Call.Name,
                             result.Output,
-                            result.IsError);
+                            result.IsError,
+                            result.Duration,
+                            apiDuration);
                     }
                 }
 
@@ -203,7 +218,9 @@ public sealed class Agent : IAgent
                             toolCall.CallId,
                             subagentName,
                             result.Output,
-                            result.IsError);
+                            result.IsError,
+                            result.Duration,
+                            apiDuration);
                     }
                     else
                     {
@@ -211,7 +228,9 @@ public sealed class Agent : IAgent
                             toolCall.CallId,
                             toolCall.Name,
                             result.Output,
-                            result.IsError);
+                            result.IsError,
+                            result.Duration,
+                            apiDuration);
                     }
                 }
             }
@@ -246,16 +265,17 @@ public sealed class Agent : IAgent
         ModelToolCall call,
         CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
         if (!_toolsByName.TryGetValue(call.Name, out var tool))
         {
-            return ToolExecutionResult.Error($"Unknown tool: {call.Name}");
+            return ToolExecutionResult.Error($"Unknown tool: {call.Name}", stopwatch.Elapsed);
         }
 
         try
         {
             using var arguments = JsonDocument.Parse(call.Arguments);
             var output = await tool.ExecuteAsync(arguments.RootElement, cancellationToken);
-            return ToolExecutionResult.Success(output);
+            return ToolExecutionResult.Success(output, stopwatch.Elapsed);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -263,11 +283,15 @@ public sealed class Agent : IAgent
         }
         catch (JsonException exception)
         {
-            return ToolExecutionResult.Error($"Invalid arguments for tool '{call.Name}': {exception.Message}");
+            return ToolExecutionResult.Error(
+                $"Invalid arguments for tool '{call.Name}': {exception.Message}",
+                stopwatch.Elapsed);
         }
         catch (Exception exception)
         {
-            return ToolExecutionResult.Error($"Tool '{call.Name}' failed: {exception.Message}");
+            return ToolExecutionResult.Error(
+                $"Tool '{call.Name}' failed: {exception.Message}",
+                stopwatch.Elapsed);
         }
     }
 
@@ -322,10 +346,15 @@ public sealed class Agent : IAgent
         ModelToolCall Call,
         Task<ToolExecutionResult> Task);
 
-    private sealed record ToolExecutionResult(string Output, bool IsError)
+    private sealed record ToolExecutionResult(
+        string Output,
+        bool IsError,
+        TimeSpan Duration)
     {
-        public static ToolExecutionResult Success(string output) => new(output, false);
+        public static ToolExecutionResult Success(string output, TimeSpan duration) =>
+            new(output, false, duration);
 
-        public static ToolExecutionResult Error(string message) => new($"Error: {message}", true);
+        public static ToolExecutionResult Error(string message, TimeSpan duration) =>
+            new($"Error: {message}", true, duration);
     }
 }

@@ -74,7 +74,7 @@ public sealed class FileWorkSessionStoreTests
             WorkingDirectory = directory.Path,
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
-            Model = new ModelOptions("first"),
+            Model = new ModelOptions("first", Provider: "provider-one"),
         };
         session.Conversation.Add(new ToolResult("call-1", "failed", IsError: true));
 
@@ -86,6 +86,7 @@ public sealed class FileWorkSessionStoreTests
         Assert.Equal(Path.GetFullPath(directory.Path), loaded?.Session.WorkingDirectory);
         Assert.Equal("장기 목표와 제약", loaded?.Work?.Context);
         Assert.Equal(now, loaded?.Session.CreatedAtUtc);
+        Assert.Equal("provider-one", loaded?.Session.Model.Provider);
         Assert.True(Assert.IsType<ToolResult>(Assert.Single(loaded!.Session.Conversation)).IsError);
     }
 
@@ -167,6 +168,68 @@ public sealed class FileWorkSessionStoreTests
         Assert.Null(await store.LoadCurrentAsync());
         Assert.False(Directory.Exists(Path.Combine(directory.Path, "sessions", current.Id)));
         Assert.False(await store.DeleteSessionAsync(current.Id));
+    }
+
+    [Fact]
+    public async Task DeleteWorkRemovesAllChildSessionsAndPreservesUnrelatedConversations()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new FileWorkSessionStore(directory.Path);
+        var now = DateTimeOffset.UtcNow;
+        var work = new Work
+        {
+            Id = "work-1",
+            Title = "삭제할 Work",
+            WorkingDirectory = directory.Path,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+        };
+        var firstChild = new Session
+        {
+            Id = "child-1",
+            Title = "첫 대화",
+            WorkId = work.Id,
+            WorkingDirectory = directory.Path,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            Model = new ModelOptions("first"),
+        };
+        var secondChild = new Session
+        {
+            Id = "child-2",
+            Title = "둘째 대화",
+            WorkId = work.Id,
+            WorkingDirectory = directory.Path,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            Model = new ModelOptions("first"),
+        };
+        var standalone = new Session
+        {
+            Id = "standalone",
+            Title = "독립 대화",
+            WorkingDirectory = directory.Path,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            Model = new ModelOptions("first"),
+        };
+        firstChild.Conversation.Add(new UserMessage("함께 삭제할 기록"));
+
+        await store.SaveWorkAsync(work);
+        await store.SaveSessionAsync(firstChild);
+        await store.AppendConversationAsync(firstChild, 0);
+        await store.SaveSessionAsync(secondChild);
+        await store.SaveSessionAsync(standalone);
+        await store.SetCurrentAsync(firstChild);
+
+        Assert.True(await store.DeleteWorkAsync(work.Id));
+
+        Assert.Empty(await store.LoadWorksAsync());
+        Assert.Null(await store.LoadConversationAsync(firstChild.Id));
+        Assert.Null(await store.LoadConversationAsync(secondChild.Id));
+        Assert.NotNull(await store.LoadConversationAsync(standalone.Id));
+        Assert.Null(await store.LoadCurrentAsync());
+        Assert.False(await store.DeleteWorkAsync(work.Id));
     }
 
     private sealed class TemporaryDirectory : IDisposable

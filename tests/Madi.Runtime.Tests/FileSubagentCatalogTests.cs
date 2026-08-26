@@ -33,6 +33,24 @@ public sealed class FileSubagentCatalogTests
     }
 
     [Fact]
+    public async Task UnmodifiedLegacyDefaultsMigrateToConfiguredModel()
+    {
+        using var directory = new TemporaryDirectory();
+        await new FileSubagentCatalog(directory.Path).LoadAsync();
+
+        var subagents = await new FileSubagentCatalog(
+            directory.Path,
+            "OpenAI API/api-model").LoadAsync();
+
+        Assert.Equal(
+            "OpenAI API/api-model:high",
+            subagents.Single(item => item.Name == "reviewer").Model);
+        Assert.Equal(
+            "OpenAI API/api-model:medium",
+            subagents.Single(item => item.Name == "scanner").Model);
+    }
+
+    [Fact]
     public async Task ExistingSubagentsDirectoryLoadsFilesWithoutOverwriting()
     {
         using var directory = new TemporaryDirectory();

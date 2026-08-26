@@ -659,10 +659,13 @@ public sealed class MadiWindow : Window
     {
         var work = state.Work?.Title ?? "없음";
         var session = state.Session?.Title ?? "새 대화";
-        var authentication = state.Authentication switch
+        var authentication = (state.AuthenticationKind, state.Authentication) switch
         {
-            AuthenticationState.SignedIn => "로그인됨",
-            AuthenticationState.SignedOut => "로그아웃",
+            (AuthenticationKind.OAuth, AuthenticationState.Ready) => "로그인됨",
+            (AuthenticationKind.OAuth, AuthenticationState.ActionRequired) => "로그인 필요",
+            (AuthenticationKind.ApiKey, AuthenticationState.Ready) => "API 키 설정됨",
+            (AuthenticationKind.ApiKey, AuthenticationState.ActionRequired) => "API 키 필요",
+            (_, AuthenticationState.NotRequired) => "인증 불필요",
             _ => "확인 중",
         };
         var runState = state.RunState switch
@@ -672,7 +675,7 @@ public sealed class MadiWindow : Window
             _ => "유휴",
         };
         _header.Text =
-            $" 모델: {state.Model.Model}  |  Work: {work}  |  Session: {session}\n" +
+            $" 모델: {state.Model.QualifiedName}  |  Work: {work}  |  Session: {session}\n" +
             $" 경로: {state.WorkingDirectory}\n" +
             $" 인증: {authentication}  |  상태: {runState}";
     }

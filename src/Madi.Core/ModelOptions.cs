@@ -13,10 +13,16 @@ public enum ReasoningEffort
 /// <summary>Provider-neutral model selection and generation settings.</summary>
 public sealed record ModelOptions(
     string Model,
-    ReasoningEffort? ReasoningEffort = null)
+    ReasoningEffort? ReasoningEffort = null,
+    string? Provider = null)
 {
     public string Model { get; init; } =
         string.IsNullOrWhiteSpace(Model)
             ? throw new ArgumentException("A model name is required.", nameof(Model))
             : Model;
+
+    public string? Provider { get; init; } =
+        string.IsNullOrWhiteSpace(Provider) ? null : Provider;
+
+    public string QualifiedName => Provider is null ? Model : $"{Provider}/{Model}";
 }

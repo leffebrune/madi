@@ -169,6 +169,7 @@ public sealed class TerminalGuiInteractionTests
         public Task SaveSessionAsync(Session session, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task AppendConversationAsync(Session session, int startIndex, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<bool> DeleteWorkAsync(string workId, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task SetCurrentAsync(Session session, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
