@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Madi.Core;
 using Madi.Runtime.Authentication;
+using Madi.Runtime.Providers;
 
 namespace Madi.App;
 
@@ -8,13 +9,15 @@ public sealed class MadiController
 {
     private readonly IAgent _agent;
     private readonly IWorkSessionStore _store;
-    private readonly IOAuthAuthentication _authentication;
+    private readonly IModelAuthenticationCoordinator _authentication;
     private readonly IReadOnlyList<AvailableModel> _availableModels;
     private readonly string _workingDirectory;
     private ModelOptions _selectedModel;
     private Work? _currentWork;
     private Session? _currentSession;
+    private AuthenticationKind _authenticationKind;
     private AuthenticationState _authenticationState = AuthenticationState.Unknown;
+    private string? _authenticationMessage;
     private AppRunState _runState;
     private int _isExecuting;
     private bool _initialized;
@@ -24,16 +27,34 @@ public sealed class MadiController
         IWorkSessionStore store,
         ModelOptions defaultModel,
         IReadOnlyList<AvailableModel> availableModels,
-        IOAuthAuthentication authentication,
+        IModelAuthenticationCoordinator authentication,
         string? workingDirectory = null)
     {
         _agent = agent ?? throw new ArgumentNullException(nameof(agent));
         _store = store ?? throw new ArgumentNullException(nameof(store));
-        _selectedModel = defaultModel ?? throw new ArgumentNullException(nameof(defaultModel));
+        ArgumentNullException.ThrowIfNull(defaultModel);
         _availableModels = availableModels ?? throw new ArgumentNullException(nameof(availableModels));
         _authentication = authentication ?? throw new ArgumentNullException(nameof(authentication));
+        _selectedModel = _authentication.ResolveModel(defaultModel);
         _workingDirectory = Path.GetFullPath(workingDirectory ?? Environment.CurrentDirectory);
         Commands = CreateCommandCatalog();
+    }
+
+    public MadiController(
+        IAgent agent,
+        IWorkSessionStore store,
+        ModelOptions defaultModel,
+        IReadOnlyList<AvailableModel> availableModels,
+        IOAuthAuthentication authentication,
+        string? workingDirectory = null)
+        : this(
+            agent,
+            store,
+            defaultModel,
+            availableModels,
+            new OAuthModelAuthenticationCoordinator(availableModels, authentication),
+            workingDirectory)
+    {
     }
 
     public AppState State => CreateState();
@@ -63,15 +84,15 @@ public sealed class MadiController
             _selectedModel = current.Session.Model;
         }
 
-        try
+        _selectedModel = _currentSession is null
+            ? _authentication.ResolveModel(_selectedModel)
+            : ResolvePersistedModel(_currentSession);
+        if (_currentSession is not null && _currentSession.Model != _selectedModel)
         {
-            _ = await _authentication.GetAuthorizationAsync(cancellationToken);
-            _authenticationState = AuthenticationState.SignedIn;
+            _currentSession.Model = _selectedModel;
+            await _store.SaveSessionAsync(_currentSession, cancellationToken);
         }
-        catch (InvalidOperationException)
-        {
-            _authenticationState = AuthenticationState.SignedOut;
-        }
+        await RefreshAuthenticationAsync(cancellationToken);
 
         _initialized = true;
     }
@@ -112,7 +133,7 @@ public sealed class MadiController
 
         await foreach (var item in ExecuteSerializedAsync(
             token => ExecuteActionCoreAsync(action, token),
-            action is LoginAction,
+            action is LoginAction or LogoutAction,
             cancellationToken))
         {
             yield return item;
@@ -206,7 +227,7 @@ public sealed class MadiController
                 {
                     yield return new AppAuthenticationProgress(
                         AuthenticationProgressKind.Failed,
-                        $"로그인에 실패했습니다: {failure.Message}");
+                        $"인증 작업에 실패했습니다: {failure.Message}");
                 }
                 else
                 {
@@ -277,6 +298,9 @@ public sealed class MadiController
             DeleteSessionAction delete => DeleteSessionAsync(
                 delete.SessionId,
                 cancellationToken),
+            DeleteWorkAction delete => DeleteWorkAsync(
+                delete.WorkId,
+                cancellationToken),
             LoginAction => LoginAsync(string.Empty, cancellationToken),
             LogoutAction => LogoutAsync(string.Empty, cancellationToken),
             ImportLegacyWorkspaceDataAction => ImportLegacyWorkspaceDataAsync(cancellationToken),
@@ -297,6 +321,16 @@ public sealed class MadiController
         if (_availableModels.Count == 0)
         {
             yield return new AppMessage("사용 가능한 모델이 없습니다.", AppMessageKind.Error);
+            yield return new AppTurnCompleted(false);
+            yield break;
+        }
+
+        await RefreshAuthenticationAsync(cancellationToken);
+        if (_authenticationState == AuthenticationState.ActionRequired)
+        {
+            yield return new AppMessage(
+                _authenticationMessage ?? "선택한 모델의 인증 설정이 필요합니다.",
+                AppMessageKind.Error);
             yield return new AppTurnCompleted(false);
             yield break;
         }
@@ -335,7 +369,9 @@ public sealed class MadiController
                             result.Name,
                             toolArguments.GetValueOrDefault(result.CallId, string.Empty),
                             result.Result,
-                            result.IsError);
+                            result.IsError,
+                            result.ToolDuration,
+                            result.ApiDuration);
                         break;
                     case AgentSubagentStarted started:
                         subagentPrompts[started.CallId] = started.Prompt;
@@ -350,13 +386,23 @@ public sealed class MadiController
                             result.Name,
                             subagentPrompts.GetValueOrDefault(result.CallId, string.Empty),
                             result.Response,
-                            result.IsError);
+                            result.IsError,
+                            result.ToolDuration,
+                            result.ApiDuration);
                         break;
                     case AgentUsageReported usage:
                         yield return new AppUsageReported(usage.Usage);
                         break;
-                    case AgentResponseCompleted:
+                    case AgentAssistantCompleted completed:
+                        yield return new AppAssistantCompleted(
+                            completed.ApiDuration,
+                            completed.Text);
+                        break;
+                    case AgentResponseCompleted completed:
                         agentCompleted = true;
+                        yield return new AppAssistantCompleted(
+                            completed.ApiDuration,
+                            completed.Text);
                         break;
                 }
             }
@@ -441,11 +487,17 @@ public sealed class MadiController
         foreach (var model in _availableModels)
         {
             var selected = string.Equals(
-                model.Name,
-                _selectedModel.Model,
-                StringComparison.OrdinalIgnoreCase) ? " *" : string.Empty;
+                               model.Name,
+                               _selectedModel.Model,
+                               StringComparison.OrdinalIgnoreCase)
+                           && string.Equals(
+                               model.Provider,
+                               _selectedModel.Provider,
+                               StringComparison.OrdinalIgnoreCase)
+                ? " *"
+                : string.Empty;
             yield return new AppMessage(
-                $"{model.Name} ({model.Provider}, context {model.MaxContextTokens:N0}){selected}");
+                $"{model.QualifiedName} (context {model.MaxContextTokens:N0}){selected}");
         }
         yield return new AppTurnCompleted(true);
     }
@@ -461,24 +513,62 @@ public sealed class MadiController
             yield break;
         }
 
-        var model = _availableModels.FirstOrDefault(item =>
-            string.Equals(item.Name, argument, StringComparison.OrdinalIgnoreCase));
-        if (model is null)
+        var matches = _availableModels.Where(item =>
+                argument.Contains('/')
+                    ? string.Equals(
+                        item.QualifiedName,
+                        argument,
+                        StringComparison.OrdinalIgnoreCase)
+                    : string.Equals(item.Name, argument, StringComparison.OrdinalIgnoreCase))
+            .Take(2)
+            .ToArray();
+        if (matches.Length == 0)
         {
             yield return new AppMessage($"사용할 수 없는 모델입니다: {argument}", AppMessageKind.Error);
             yield return new AppTurnCompleted(false);
             yield break;
         }
+        if (matches.Length > 1)
+        {
+            yield return new AppMessage(
+                $"모델 이름이 중복됩니다. provider/model 형식으로 선택하세요: {argument}",
+                AppMessageKind.Error);
+            yield return new AppTurnCompleted(false);
+            yield break;
+        }
 
-        _selectedModel = new ModelOptions(model.Name, _selectedModel.ReasoningEffort);
+        var model = matches[0];
+        var currentModel = FindSelectedAvailableModel();
+        if (_currentSession is { Conversation.Count: > 0 }
+            && currentModel is not null
+            && (!string.Equals(
+                    currentModel.Provider,
+                    model.Provider,
+                    StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(currentModel.Api, model.Api, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(currentModel.BaseUrl, model.BaseUrl, StringComparison.OrdinalIgnoreCase)))
+        {
+            yield return new AppMessage(
+                "다른 provider로 변경하려면 새 Session을 먼저 만드세요.",
+                AppMessageKind.Warning);
+            yield return new AppStateChanged(CreateState());
+            yield return new AppTurnCompleted(false);
+            yield break;
+        }
+
+        _selectedModel = new ModelOptions(
+            model.Name,
+            model.SupportsReasoning ? _selectedModel.ReasoningEffort : null,
+            model.Provider);
         if (_currentSession is not null)
         {
             _currentSession.Model = _selectedModel;
             _currentSession.UpdatedAtUtc = DateTimeOffset.UtcNow;
             await _store.SaveSessionAsync(_currentSession, cancellationToken);
         }
+        await RefreshAuthenticationAsync(cancellationToken);
 
-        yield return new AppMessage($"모델을 선택했습니다: {model.Name}");
+        yield return new AppMessage($"모델을 선택했습니다: {model.QualifiedName}");
         yield return new AppStateChanged(CreateState());
         yield return new AppNavigationChanged(
             await CreateNavigationSnapshotAsync(cancellationToken));
@@ -661,8 +751,11 @@ public sealed class MadiController
 
         _currentWork = conversation.Work;
         _currentSession = conversation.Session;
-        _selectedModel = conversation.Session.Model;
+        _selectedModel = ResolvePersistedModel(conversation.Session);
+        conversation.Session.Model = _selectedModel;
+        await _store.SaveSessionAsync(conversation.Session, cancellationToken);
         await _store.SetCurrentAsync(conversation.Session, cancellationToken);
+        await RefreshAuthenticationAsync(cancellationToken);
 
         yield return new AppConversationLoaded(
             ConversationSnapshotFactory.Create(conversation.Session));
@@ -763,6 +856,116 @@ public sealed class MadiController
             }
         }
 
+        if (deletesCurrent && _currentSession is not null)
+        {
+            _selectedModel = ResolvePersistedModel(_currentSession);
+            _currentSession.Model = _selectedModel;
+            await _store.SaveSessionAsync(_currentSession, cancellationToken);
+            await RefreshAuthenticationAsync(cancellationToken);
+        }
+
+        yield return new AppNavigationChanged(
+            await CreateNavigationSnapshotAsync(cancellationToken));
+        yield return new AppStateChanged(CreateState());
+        yield return new AppTurnCompleted(true);
+    }
+
+    private async IAsyncEnumerable<AppEvent> DeleteWorkAsync(
+        string workId,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(workId))
+        {
+            yield return new AppMessage("Work ID가 필요합니다.", AppMessageKind.Error);
+            yield return new AppTurnCompleted(false);
+            yield break;
+        }
+
+        var work = (await _store.LoadWorksAsync(cancellationToken))
+            .FirstOrDefault(item => string.Equals(item.Id, workId, StringComparison.Ordinal));
+        if (work is null || !IsCurrentWorkspace(work.WorkingDirectory))
+        {
+            yield return new AppMessage(
+                $"현재 작업공간에서 Work를 찾을 수 없습니다: {workId}",
+                AppMessageKind.Error);
+            yield return new AppTurnCompleted(false);
+            yield break;
+        }
+
+        var deletesCurrent = string.Equals(_currentWork?.Id, workId, StringComparison.Ordinal);
+        CurrentConversation? replacement = null;
+        if (deletesCurrent)
+        {
+            var candidates = (await _store.LoadSessionsAsync(cancellationToken))
+                .Where(session => !string.Equals(session.WorkId, workId, StringComparison.Ordinal)
+                                  && IsCurrentWorkspace(session.WorkingDirectory))
+                .OrderByDescending(static session => session.UpdatedAtUtc);
+            foreach (var candidate in candidates)
+            {
+                replacement = await _store.LoadConversationAsync(candidate.Id, cancellationToken);
+                if (replacement is not null)
+                {
+                    break;
+                }
+            }
+
+            if (replacement is not null)
+            {
+                await _store.SetCurrentAsync(replacement.Session, cancellationToken);
+            }
+        }
+
+        bool deleted;
+        try
+        {
+            deleted = await _store.DeleteWorkAsync(workId, cancellationToken);
+        }
+        catch
+        {
+            if (deletesCurrent && replacement is not null && _currentSession is not null)
+            {
+                await _store.SetCurrentAsync(_currentSession, CancellationToken.None);
+            }
+            throw;
+        }
+
+        if (!deleted)
+        {
+            if (deletesCurrent && replacement is not null && _currentSession is not null)
+            {
+                await _store.SetCurrentAsync(_currentSession, CancellationToken.None);
+            }
+            yield return new AppMessage(
+                $"Work를 삭제하지 못했습니다: {workId}",
+                AppMessageKind.Error);
+            yield return new AppTurnCompleted(false);
+            yield break;
+        }
+
+        if (deletesCurrent)
+        {
+            _currentWork = replacement?.Work;
+            _currentSession = replacement?.Session;
+            if (_currentSession is null)
+            {
+                yield return new AppConversationCleared();
+            }
+            else
+            {
+                _selectedModel = _currentSession.Model;
+                yield return new AppConversationLoaded(
+                    ConversationSnapshotFactory.Create(_currentSession));
+            }
+        }
+
+        if (deletesCurrent && _currentSession is not null)
+        {
+            _selectedModel = ResolvePersistedModel(_currentSession);
+            _currentSession.Model = _selectedModel;
+            await _store.SaveSessionAsync(_currentSession, cancellationToken);
+            await RefreshAuthenticationAsync(cancellationToken);
+        }
+
         yield return new AppNavigationChanged(
             await CreateNavigationSnapshotAsync(cancellationToken));
         yield return new AppStateChanged(CreateState());
@@ -814,11 +1017,22 @@ public sealed class MadiController
             yield break;
         }
 
+        if (_authenticationKind != AuthenticationKind.OAuth)
+        {
+            yield return new AppMessage(
+                _authenticationKind == AuthenticationKind.ApiKey
+                    ? "이 모델은 models.json의 apiKey를 사용하므로 OAuth 로그인이 필요하지 않습니다."
+                    : "선택한 모델은 OAuth 로그인을 지원하지 않습니다.",
+                AppMessageKind.Warning);
+            yield return new AppTurnCompleted(false);
+            yield break;
+        }
+
         yield return new AppAuthenticationProgress(
             AuthenticationProgressKind.Started,
             "브라우저에서 로그인을 완료하세요.");
-        await _authentication.LoginAsync(cancellationToken);
-        _authenticationState = AuthenticationState.SignedIn;
+        await _authentication.LoginAsync(_selectedModel, cancellationToken);
+        await RefreshAuthenticationAsync(cancellationToken);
         yield return new AppAuthenticationProgress(
             AuthenticationProgressKind.Succeeded,
             "로그인 정보를 저장했습니다.");
@@ -837,8 +1051,17 @@ public sealed class MadiController
             yield break;
         }
 
-        await _authentication.LogoutAsync(cancellationToken);
-        _authenticationState = AuthenticationState.SignedOut;
+        if (_authenticationKind != AuthenticationKind.OAuth)
+        {
+            yield return new AppMessage(
+                "선택한 모델은 OAuth 로그아웃을 지원하지 않습니다.",
+                AppMessageKind.Warning);
+            yield return new AppTurnCompleted(false);
+            yield break;
+        }
+
+        await _authentication.LogoutAsync(_selectedModel, cancellationToken);
+        await RefreshAuthenticationAsync(cancellationToken);
         yield return new AppAuthenticationProgress(
             AuthenticationProgressKind.SignedOut,
             "로그인 정보를 삭제했습니다.");
@@ -869,11 +1092,16 @@ public sealed class MadiController
     {
         cancellationToken.ThrowIfCancellationRequested();
         IReadOnlyList<CommandCompletion> result = _availableModels
-            .Where(model => model.Name.StartsWith(argument, StringComparison.OrdinalIgnoreCase))
+            .Where(model => model.QualifiedName.StartsWith(argument, StringComparison.OrdinalIgnoreCase)
+                            || model.Name.StartsWith(argument, StringComparison.OrdinalIgnoreCase))
             .Select(model => new CommandCompletion(
-                model.Name,
-                $"{model.Name} ({model.Provider})",
-                string.Equals(model.Name, _selectedModel.Model, StringComparison.OrdinalIgnoreCase)))
+                model.QualifiedName,
+                model.QualifiedName,
+                string.Equals(model.Name, _selectedModel.Model, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(
+                    model.Provider,
+                    _selectedModel.Provider,
+                    StringComparison.OrdinalIgnoreCase)))
             .ToArray();
         return ValueTask.FromResult(result);
     }
@@ -975,15 +1203,85 @@ public sealed class MadiController
             ? null
             : new SessionSnapshot(_currentSession.Id, _currentSession.Title, _currentSession.WorkId),
         _runState,
+        _authenticationKind,
         _authenticationState,
         _workingDirectory);
+
+    private ModelOptions ResolvePersistedModel(Session session)
+    {
+        var options = session.Model;
+        if (!string.IsNullOrWhiteSpace(options.Provider))
+        {
+            return _authentication.ResolveModel(options);
+        }
+
+        var matches = _availableModels
+            .Where(model => string.Equals(
+                model.Name,
+                options.Model,
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (matches.Length <= 1)
+        {
+            return _authentication.ResolveModel(options);
+        }
+
+        var historicalProviderIds = session.Conversation
+            .OfType<ModelOutputItem>()
+            .Select(static item => item.ProviderId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var inferred = historicalProviderIds.Length == 1
+            ? matches.FirstOrDefault(model => string.Equals(
+                model.Api,
+                historicalProviderIds[0],
+                StringComparison.OrdinalIgnoreCase))
+            : null;
+        inferred ??= matches.FirstOrDefault(model => string.Equals(
+            model.Provider,
+            _selectedModel.Provider,
+            StringComparison.OrdinalIgnoreCase));
+        inferred ??= matches[0];
+        return _authentication.ResolveModel(options with { Provider = inferred.Provider });
+    }
+
+    private AvailableModel? FindSelectedAvailableModel() =>
+        _availableModels.FirstOrDefault(model =>
+            string.Equals(model.Name, _selectedModel.Model, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(
+                model.Provider,
+                _selectedModel.Provider,
+                StringComparison.OrdinalIgnoreCase));
+
+    private async Task RefreshAuthenticationAsync(CancellationToken cancellationToken)
+    {
+        var authentication = await _authentication.GetAuthenticationAsync(
+            _selectedModel,
+            cancellationToken);
+        _authenticationKind = authentication.Kind switch
+        {
+            ModelAuthenticationKind.OAuth => AuthenticationKind.OAuth,
+            ModelAuthenticationKind.ApiKey => AuthenticationKind.ApiKey,
+            _ => AuthenticationKind.None,
+        };
+        _authenticationState = authentication.Status switch
+        {
+            ModelAuthenticationStatus.NotRequired => AuthenticationState.NotRequired,
+            ModelAuthenticationStatus.ActionRequired => AuthenticationState.ActionRequired,
+            ModelAuthenticationStatus.Ready => AuthenticationState.Ready,
+            _ => AuthenticationState.Unknown,
+        };
+        _authenticationMessage = authentication.Message;
+    }
 
     private static AppMessage Usage(string usage) =>
         new($"사용법: {usage}", AppMessageKind.Error);
 
     private static bool IsAuthenticationCommand(string input) =>
         input.Equals("/login", StringComparison.OrdinalIgnoreCase)
-        || input.StartsWith("/login ", StringComparison.OrdinalIgnoreCase);
+        || input.StartsWith("/login ", StringComparison.OrdinalIgnoreCase)
+        || input.Equals("/logout", StringComparison.OrdinalIgnoreCase)
+        || input.StartsWith("/logout ", StringComparison.OrdinalIgnoreCase);
 
     private static string CreateSessionTitle(string prompt)
     {

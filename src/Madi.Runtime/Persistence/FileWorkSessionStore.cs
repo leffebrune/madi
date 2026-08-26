@@ -317,6 +317,59 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
         }
     }
 
+    public async Task<bool> DeleteWorkAsync(
+        string workId,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateId(workId, nameof(workId));
+
+        await FileLock.WaitAsync(cancellationToken);
+        try
+        {
+            var workPath = GetWorkPath(workId);
+            if (!File.Exists(workPath))
+            {
+                return false;
+            }
+
+            var childSessions = (await LoadAllSessionMetadataUnlockedAsync(cancellationToken))
+                .Where(session => string.Equals(session.WorkId, workId, StringComparison.Ordinal))
+                .Select(static session => session.Id)
+                .ToHashSet(StringComparer.Ordinal);
+
+            if (File.Exists(_currentPath))
+            {
+                var current = await ReadJsonAsync(
+                    _currentPath,
+                    PersistenceJsonContext.Relaxed.CurrentDocument,
+                    cancellationToken);
+                if (childSessions.Contains(current.SessionId))
+                {
+                    // Clear the pointer first so it cannot reference a deleted child session.
+                    File.Delete(_currentPath);
+                }
+            }
+
+            // Keep the Work document until every child is gone. This prevents any
+            // surviving session from referencing a missing Work if deletion fails.
+            foreach (var sessionId in childSessions)
+            {
+                var sessionPath = Path.Combine(_sessionsPath, sessionId);
+                if (Directory.Exists(sessionPath))
+                {
+                    Directory.Delete(sessionPath, recursive: true);
+                }
+            }
+            File.Delete(workPath);
+
+            return true;
+        }
+        finally
+        {
+            FileLock.Release();
+        }
+    }
+
     public async Task SetCurrentAsync(
         Session session,
         CancellationToken cancellationToken = default)
@@ -426,6 +479,11 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
         var session = document.ToDomain(
             File.GetCreationTimeUtc(metadataPath),
             File.GetLastWriteTimeUtc(metadataPath));
+        if (!string.Equals(session.Id, sessionId, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                $"Session document ID '{session.Id}' does not match directory '{sessionId}'.");
+        }
 
         var conversationPath = GetConversationPath(sessionId);
         if (!includeConversation || !File.Exists(conversationPath))

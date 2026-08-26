@@ -24,6 +24,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string? _errorText;
     private bool _isBusy;
     private bool _isSignedIn;
+    private bool _supportsOAuth;
     private bool _followLatest = true;
     private string? _submittedDraft;
 
@@ -166,11 +167,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(CanInteract));
                 OnPropertyChanged(nameof(CanSaveWorkPrompt));
                 OnPropertyChanged(nameof(SendButtonText));
+                OnPropertyChanged(nameof(CanToggleAuthentication));
             }
         }
     }
 
     public bool CanInteract => !IsBusy;
+    public bool CanToggleAuthentication => CanInteract && _supportsOAuth;
     public string SendButtonText => IsBusy ? "취소" : "전송";
 
     public bool IsSignedIn
@@ -241,8 +244,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public Task DeleteSessionAsync(string sessionId) =>
         ExecuteAsync(new DeleteSessionAction(sessionId));
 
+    public Task DeleteWorkAsync(string workId) =>
+        ExecuteAsync(new DeleteWorkAction(workId));
+
     public Task ToggleAuthenticationAsync() =>
-        ExecuteAsync(IsSignedIn ? new LogoutAction() : new LoginAction());
+        !CanToggleAuthentication
+            ? Task.CompletedTask
+            : ExecuteAsync(IsSignedIn ? new LogoutAction() : new LoginAction());
 
     public Task ImportLegacyDataAsync() =>
         ExecuteAsync(new ImportLegacyWorkspaceDataAction());
@@ -357,6 +365,24 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 }
                 assistant.Text += delta.Text;
                 break;
+            case AppAssistantCompleted completed:
+                var completedAssistant = Timeline.LastOrDefault();
+                if (completedAssistant?.Kind != TimelineItemKind.Assistant)
+                {
+                    if (string.IsNullOrEmpty(completed.Text))
+                    {
+                        break;
+                    }
+
+                    completedAssistant = new TimelineItemViewModel(
+                        TimelineItemKind.Assistant,
+                        completed.Text);
+                    Timeline.Add(completedAssistant);
+                }
+                completedAssistant.ApiDuration = completed.ApiDuration > TimeSpan.Zero
+                    ? completed.ApiDuration
+                    : null;
+                break;
             case AppToolStarted tool:
                 Timeline.Add(new TimelineItemViewModel(
                     TimelineItemKind.Tool,
@@ -371,7 +397,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                     tool.CallId,
                     tool.Name,
                     $"### 인자\n```json\n{tool.Arguments}\n```\n\n### 결과\n```text\n{tool.Result}\n```",
-                    tool.IsError);
+                    tool.IsError,
+                    tool.ToolDuration,
+                    tool.ApiDuration);
                 break;
             case AppSubagentStarted subagent:
                 Timeline.Add(new TimelineItemViewModel(
@@ -389,7 +417,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                     subagent.CallId,
                     subagent.Name,
                     $"### 프롬프트\n{subagent.Prompt}\n\n### 결과\n{subagent.Response}",
-                    subagent.IsError);
+                    subagent.IsError,
+                    subagent.ToolDuration,
+                    subagent.ApiDuration);
                 break;
             case AppUsageReported usage:
                 UsageText = FormatUsage(usage.Usage);
@@ -429,7 +459,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void ApplyState(AppState state)
     {
         IsBusy = state.IsBusy;
-        SelectedModelName = state.Model.Model;
+        SelectedModelName = state.Model.QualifiedName;
 
         var nextWorkId = state.Work?.Id;
         var workChanged = !string.Equals(CurrentWorkId, nextWorkId, StringComparison.Ordinal);
@@ -441,11 +471,16 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
         HeaderTitle = state.Session?.Title ?? "새 대화";
         WorkingDirectory = state.WorkingDirectory;
-        IsSignedIn = state.Authentication == AuthenticationState.SignedIn;
-        AuthenticationLabel = state.Authentication switch
+        _supportsOAuth = state.AuthenticationKind == AuthenticationKind.OAuth;
+        OnPropertyChanged(nameof(CanToggleAuthentication));
+        IsSignedIn = _supportsOAuth && state.Authentication == AuthenticationState.Ready;
+        AuthenticationLabel = (state.AuthenticationKind, state.Authentication) switch
         {
-            AuthenticationState.SignedIn => "로그인됨",
-            AuthenticationState.SignedOut => "로그인 필요",
+            (AuthenticationKind.OAuth, AuthenticationState.Ready) => "로그인됨",
+            (AuthenticationKind.OAuth, AuthenticationState.ActionRequired) => "로그인 필요",
+            (AuthenticationKind.ApiKey, AuthenticationState.Ready) => "API 키 설정됨",
+            (AuthenticationKind.ApiKey, AuthenticationState.ActionRequired) => "API 키 필요",
+            (_, AuthenticationState.NotRequired) => "인증 불필요",
             _ => "확인 중",
         };
     }
@@ -534,7 +569,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _ => null,
     };
 
-    private void CompleteActivity(string callId, string text, string details, bool isError)
+    private void CompleteActivity(
+        string callId,
+        string text,
+        string details,
+        bool isError,
+        TimeSpan toolDuration,
+        TimeSpan apiDuration)
     {
         var activity = Timeline.LastOrDefault(entry =>
             string.Equals(entry.ActivityId, callId, StringComparison.Ordinal));
@@ -547,6 +588,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         activity.Details = details;
         activity.IsRunning = false;
         activity.IsError = isError;
+        activity.ToolDuration = toolDuration > TimeSpan.Zero ? toolDuration : null;
+        activity.ApiDuration = apiDuration > TimeSpan.Zero ? apiDuration : null;
     }
 
     private async Task RefreshSuggestionsAsync(string input)

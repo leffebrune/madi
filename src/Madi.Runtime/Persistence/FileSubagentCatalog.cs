@@ -8,13 +8,17 @@ namespace Madi.Runtime.Persistence;
 public sealed class FileSubagentCatalog : ISubagentCatalog
 {
     private readonly string _directoryPath;
+    private readonly string _defaultModel;
     private readonly IDeserializer _deserializer;
 
-    public FileSubagentCatalog(string storageRoot)
+    public FileSubagentCatalog(string storageRoot, string? defaultModel = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(storageRoot);
 
         _directoryPath = Path.Combine(Path.GetFullPath(storageRoot), "subagents");
+        _defaultModel = string.IsNullOrWhiteSpace(defaultModel)
+            ? "OpenAI/gpt-5.6-luna"
+            : defaultModel;
         _deserializer = new StaticDeserializerBuilder(new SubagentYamlContext())
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
             .WithDuplicateKeyChecking()
@@ -79,7 +83,10 @@ public sealed class FileSubagentCatalog : ISubagentCatalog
             foreach (var (fileName, content) in DefaultSubagents)
             {
                 var filePath = Path.Combine(_directoryPath, fileName);
-                await File.WriteAllTextAsync(filePath, content, cancellationToken);
+                await File.WriteAllTextAsync(
+                    filePath,
+                    ConfigureDefaultContent(content),
+                    cancellationToken);
             }
         }
 
@@ -90,6 +97,16 @@ public sealed class FileSubagentCatalog : ISubagentCatalog
         {
             cancellationToken.ThrowIfCancellationRequested();
             var content = await File.ReadAllTextAsync(path, cancellationToken);
+            var defaultTemplate = DefaultSubagents.FirstOrDefault(item => string.Equals(
+                item.FileName,
+                Path.GetFileName(path),
+                StringComparison.Ordinal));
+            if (defaultTemplate != default
+                && string.Equals(content, defaultTemplate.Content, StringComparison.Ordinal))
+            {
+                content = ConfigureDefaultContent(content);
+                await File.WriteAllTextAsync(path, content, cancellationToken);
+            }
             var definition = Parse(path, content);
             if (!string.Equals(
                     Path.GetFileNameWithoutExtension(path),
@@ -111,6 +128,11 @@ public sealed class FileSubagentCatalog : ISubagentCatalog
 
         return definitions;
     }
+
+    private string ConfigureDefaultContent(string content) => content.Replace(
+        "model: OpenAI/gpt-5.6-luna:",
+        $"model: {_defaultModel}:",
+        StringComparison.Ordinal);
 
     private SubagentDefinition Parse(string path, string content)
     {

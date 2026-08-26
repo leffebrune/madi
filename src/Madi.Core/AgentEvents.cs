@@ -17,7 +17,9 @@ public sealed record AgentToolExecutionCompleted(
     string CallId,
     string Name,
     string Result,
-    bool IsError) : AgentEvent;
+    bool IsError,
+    TimeSpan ToolDuration = default,
+    TimeSpan ApiDuration = default) : AgentEvent;
 
 public sealed record AgentSubagentStarted(
     string CallId,
@@ -28,8 +30,16 @@ public sealed record AgentSubagentCompleted(
     string CallId,
     string Name,
     string Response,
-    bool IsError) : AgentEvent;
+    bool IsError,
+    TimeSpan ToolDuration = default,
+    TimeSpan ApiDuration = default) : AgentEvent;
 
 public sealed record AgentUsageReported(ModelUsage Usage) : AgentEvent;
 
-public sealed record AgentResponseCompleted(string Text) : AgentEvent;
+public sealed record AgentAssistantCompleted(
+    string Text,
+    TimeSpan ApiDuration) : AgentEvent;
+
+public sealed record AgentResponseCompleted(
+    string Text,
+    TimeSpan ApiDuration = default) : AgentEvent;

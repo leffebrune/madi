@@ -1,5 +1,4 @@
 using Madi.Core;
-using Madi.Networking;
 using Madi.Runtime.Agents;
 using Madi.Runtime.Authentication;
 using Madi.Runtime.Persistence;
@@ -31,7 +30,9 @@ public static class MadiAppFactory
         IWorkSessionStore store = new FileWorkSessionStore(storageRoot);
         IModelCatalog modelCatalog = new FileModelCatalog(storageRoot);
         var availableModels = await modelCatalog.LoadAsync(cancellationToken);
-        ISubagentCatalog subagentCatalog = new FileSubagentCatalog(storageRoot);
+        ISubagentCatalog subagentCatalog = new FileSubagentCatalog(
+            storageRoot,
+            availableModels.FirstOrDefault()?.QualifiedName);
         var subagentDefinitions = await subagentCatalog.LoadAsync(cancellationToken);
         ISystemPromptCatalog systemPromptCatalog = new FileSystemPromptCatalog(storageRoot);
         var systemPrompt = await systemPromptCatalog.LoadAsync(cancellationToken);
@@ -39,9 +40,9 @@ public static class MadiAppFactory
         var tools = new ToolCatalog(
             workingDirectory,
             utilityBinDirectory: utilityBinDirectory);
-        INetworkClient client = new NetworkClient(
-            OpenAINetworkConfiguration.Create(authentication));
-        IModelProvider provider = new OpenAIOAuthProvider(client);
+        IModelProviderRuntime provider = new CatalogModelProvider(
+            availableModels,
+            authentication);
         var agentTools = tools.All.ToList();
         if (subagentDefinitions.Count > 0)
         {
@@ -55,13 +56,18 @@ public static class MadiAppFactory
 
         var systemInstructions = SystemInstructionComposer.Compose(systemPrompt, agentTools);
         IAgent agent = new Agent(provider, systemInstructions, agentTools);
-        var defaultModel = new ModelOptions("gpt-5.6-luna", ReasoningEffort.Medium);
+        var defaultAvailableModel = availableModels.FirstOrDefault()
+            ?? throw new InvalidDataException("사용 가능한 모델이 없습니다.");
+        var defaultModel = new ModelOptions(
+            defaultAvailableModel.Name,
+            defaultAvailableModel.SupportsReasoning ? ReasoningEffort.Medium : null,
+            defaultAvailableModel.Provider);
         var controller = new MadiController(
             agent,
             store,
             defaultModel,
             availableModels,
-            authentication,
+            provider,
             workingDirectory);
         var utilityInstaller = new UtilityInstaller(
             new GitHubReleaseFileDownloader(),

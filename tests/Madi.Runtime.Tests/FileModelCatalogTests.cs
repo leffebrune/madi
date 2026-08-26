@@ -65,6 +65,38 @@ public sealed class FileModelCatalogTests
         Assert.Equal("CustomProvider", models[0].Provider);
     }
 
+    [Fact]
+    public async Task ProviderApiKeyIsLoadedFromConfiguration()
+    {
+        using var directory = new TemporaryDirectory();
+        var modelsPath = Path.Combine(directory.Path, "models.json");
+        await File.WriteAllTextAsync(
+            modelsPath,
+            """
+            [
+              {
+                "provider": "OpenAI API",
+                "api": "openai-response",
+                "baseUrl": "https://api.openai.com/v1",
+                "apiKey": "sk-direct-key",
+                "models": [
+                  {
+                    "name": "gpt-test",
+                    "supportsReasoning": true,
+                    "maxContextTokens": 100000
+                  }
+                ]
+              }
+            ]
+            """);
+
+        var model = Assert.Single(await new FileModelCatalog(directory.Path).LoadAsync());
+
+        Assert.Equal("OpenAI API/gpt-test", model.QualifiedName);
+        Assert.Equal("https://api.openai.com/v1", model.BaseUrl);
+        Assert.Equal("sk-direct-key", model.ApiKey);
+    }
+
     private sealed class TemporaryDirectory : IDisposable
     {
         public TemporaryDirectory()

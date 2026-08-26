@@ -36,6 +36,10 @@ public interface IWorkSessionStore
         string sessionId,
         CancellationToken cancellationToken = default);
 
+    Task<bool> DeleteWorkAsync(
+        string workId,
+        CancellationToken cancellationToken = default);
+
     Task SetCurrentAsync(
         Session session,
         CancellationToken cancellationToken = default);

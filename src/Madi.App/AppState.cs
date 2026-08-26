@@ -9,11 +9,19 @@ public enum AppRunState
     Authenticating,
 }
 
+public enum AuthenticationKind
+{
+    None,
+    OAuth,
+    ApiKey,
+}
+
 public enum AuthenticationState
 {
     Unknown,
-    SignedOut,
-    SignedIn,
+    NotRequired,
+    ActionRequired,
+    Ready,
 }
 
 public sealed record WorkSnapshot(string Id, string Title, string Prompt);
@@ -25,6 +33,7 @@ public sealed record AppState(
     WorkSnapshot? Work,
     SessionSnapshot? Session,
     AppRunState RunState,
+    AuthenticationKind AuthenticationKind,
     AuthenticationState Authentication,
     string WorkingDirectory)
 {

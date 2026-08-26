@@ -9,9 +9,12 @@ public sealed record AvailableModel
     public required string Provider { get; init; }
     public required string Api { get; init; }
     public string? BaseUrl { get; init; }
+    public string? ApiKey { get; init; }
     public bool SupportsReasoning { get; init; }
     public int MaxContextTokens { get; init; }
     public int? MaxOutputTokens { get; init; }
+
+    public string QualifiedName => $"{Provider}/{Name}";
 
     public void Validate()
     {

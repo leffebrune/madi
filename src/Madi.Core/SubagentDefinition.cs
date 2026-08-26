@@ -62,7 +62,10 @@ public sealed record SubagentDefinition
                 $"Subagent '{Name}' references unavailable model '{provider}/{name}'.");
         }
 
-        return new ModelOptions(availableModel.Name, effort);
+        return new ModelOptions(
+            availableModel.Name,
+            availableModel.SupportsReasoning ? effort : null,
+            availableModel.Provider);
     }
 
     private (string Provider, string Name, ReasoningEffort Effort) ParseModel()

@@ -15,6 +15,8 @@ public sealed class TimelineViewModelTests
         await viewModel.ApplyExternalEventAsync(new AppUserInput("질문"));
         await viewModel.ApplyExternalEventAsync(new AppAssistantDelta("답"));
         await viewModel.ApplyExternalEventAsync(new AppAssistantDelta("변"));
+        await viewModel.ApplyExternalEventAsync(new AppAssistantCompleted(
+            TimeSpan.FromMilliseconds(1250)));
         await viewModel.ApplyExternalEventAsync(new AppToolStarted(
             "call-1",
             "read",
@@ -24,13 +26,34 @@ public sealed class TimelineViewModelTests
             "read",
             """{"path":"file.txt"}""",
             "결과",
-            IsError: false));
+            IsError: false,
+            ToolDuration: TimeSpan.FromMilliseconds(240),
+            ApiDuration: TimeSpan.FromMilliseconds(1500)));
 
         Assert.Equal("답변", viewModel.Timeline[1].Text);
+        Assert.Equal("API 1.25초", viewModel.Timeline[1].TimingText);
         var tool = Assert.Single(viewModel.Timeline, item => item.Kind == TimelineItemKind.Tool);
         Assert.False(tool.IsRunning);
+        Assert.Equal("도구 240ms · API 1.5초", tool.TimingText);
         Assert.Equal("file.txt", tool.Description);
         Assert.Contains("결과", tool.Details, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CompletionCreatesAssistantWhenProviderDidNotStreamDeltas()
+    {
+        var viewModel = CreateViewModel();
+        await viewModel.ApplyExternalEventAsync(new AppAssistantDelta("이전 답변"));
+        await viewModel.ApplyExternalEventAsync(new AppUserInput("새 질문"));
+
+        await viewModel.ApplyExternalEventAsync(new AppAssistantCompleted(
+            TimeSpan.FromMilliseconds(500),
+            "새 답변"));
+
+        Assert.Equal(TimelineItemKind.Assistant, viewModel.Timeline[^1].Kind);
+        Assert.Equal("새 답변", viewModel.Timeline[^1].Text);
+        Assert.Equal("API 500ms", viewModel.Timeline[^1].TimingText);
+        Assert.Null(viewModel.Timeline[0].ApiDuration);
     }
 
     [Fact]
@@ -66,7 +89,8 @@ public sealed class TimelineViewModelTests
             work,
             new SessionSnapshot("session-1", "대화", work.Id),
             AppRunState.Idle,
-            AuthenticationState.SignedIn,
+            AuthenticationKind.OAuth,
+            AuthenticationState.Ready,
             "C:\\work")));
         viewModel.WorkPromptDraft = "수정 중인 프롬프트";
 
@@ -75,7 +99,8 @@ public sealed class TimelineViewModelTests
             work,
             new SessionSnapshot("session-1", "대화", work.Id),
             AppRunState.RunningPrompt,
-            AuthenticationState.SignedIn,
+            AuthenticationKind.OAuth,
+            AuthenticationState.Ready,
             "C:\\work")));
 
         Assert.Equal("수정 중인 프롬프트", viewModel.WorkPromptDraft);
@@ -182,6 +207,7 @@ public sealed class TimelineViewModelTests
         public Task SaveSessionAsync(Session session, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task AppendConversationAsync(Session session, int startIndex, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<bool> DeleteWorkAsync(string workId, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task SetCurrentAsync(Session session, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 

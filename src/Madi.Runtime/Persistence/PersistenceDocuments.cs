@@ -47,12 +47,13 @@ internal sealed record WorkDocument
 
 internal sealed record ModelDocument(
     string Model,
-    ReasoningEffort? ReasoningEffort)
+    ReasoningEffort? ReasoningEffort,
+    string? Provider = null)
 {
     public static ModelDocument FromDomain(ModelOptions model) =>
-        new(model.Model, model.ReasoningEffort);
+        new(model.Model, model.ReasoningEffort, model.Provider);
 
-    public ModelOptions ToDomain() => new(Model, ReasoningEffort);
+    public ModelOptions ToDomain() => new(Model, ReasoningEffort, Provider);
 }
 
 internal sealed record SessionDocument

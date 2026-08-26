@@ -349,27 +349,26 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private void OnSessionMenuClick(object sender, RoutedEventArgs e)
+    private void OnNavigationMenuClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button
-            {
-                DataContext: NavigationItemViewModel
-                {
-                    IsHeader: false,
-                    SessionId: not null,
-                } session,
-            } button)
+        if (sender is not Button { DataContext: NavigationItemViewModel item } button)
+        {
+            return;
+        }
+
+        var isWork = item is { IsHeader: true, WorkId: not null };
+        if (!isWork && item.SessionId is null)
         {
             return;
         }
 
         var deleteItem = new MenuFlyoutItem
         {
-            Text = "대화 삭제",
+            Text = isWork ? "Work 삭제" : "대화 삭제",
             Icon = new FontIcon { Glyph = "\uE74D" },
-            Tag = session,
+            Tag = item,
         };
-        deleteItem.Click += OnDeleteSession;
+        deleteItem.Click += isWork ? OnDeleteWork : OnDeleteSession;
 
         var flyout = new MenuFlyout();
         flyout.Items.Add(deleteItem);
@@ -404,6 +403,37 @@ public sealed partial class MainPage : Page
         if (await dialog.ShowAsync() == ContentDialogResult.Primary)
         {
             await _viewModel.DeleteSessionAsync(sessionId);
+        }
+    }
+
+    private async void OnDeleteWork(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null
+            || sender is not MenuFlyoutItem
+            {
+                Tag: NavigationItemViewModel { WorkId: { } workId } work,
+            })
+        {
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "Work를 삭제할까요?",
+            Content = new TextBlock
+            {
+                Text = $"‘{work.Title}’ Work와 여기에 포함된 모든 대화가 영구적으로 삭제됩니다.",
+                TextWrapping = TextWrapping.Wrap,
+            },
+            PrimaryButtonText = "삭제",
+            CloseButtonText = "취소",
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            await _viewModel.DeleteWorkAsync(workId);
         }
     }
 
