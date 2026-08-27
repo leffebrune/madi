@@ -50,6 +50,19 @@ public sealed record AppSubagentCompleted(
     TimeSpan ToolDuration = default,
     TimeSpan ApiDuration = default) : AppEvent;
 
+public sealed record AppSubagentToolStarted(
+    string SubagentCallId,
+    string ToolCallId,
+    string Name,
+    string Arguments) : AppEvent;
+
+public sealed record AppSubagentToolCompleted(
+    string SubagentCallId,
+    string ToolCallId,
+    string Name,
+    bool IsError,
+    TimeSpan ToolDuration = default) : AppEvent;
+
 public sealed record AppUsageReported(ModelUsage Usage) : AppEvent;
 
 public enum AuthenticationProgressKind

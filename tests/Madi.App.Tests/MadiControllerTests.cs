@@ -300,7 +300,7 @@ public sealed class MadiControllerTests
             [
               {
                 "provider": "OpenAI API",
-                "api": "openai-response",
+                "api": "openai-responses",
                 "baseUrl": "https://api.openai.com/v1",
                 "apiKey": "sk-test-key",
                 "models": [
@@ -359,6 +359,61 @@ public sealed class MadiControllerTests
         Assert.Equal(
             commandEvents.OfType<AppTurnCompleted>().Last(),
             actionEvents.OfType<AppTurnCompleted>().Last());
+    }
+
+    [Fact]
+    public async Task ReasoningEffortActionUpdatesAndPersistsCurrentSession()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var session = Session("session-1", "대화", null, "C:\\work", now);
+        session.Model = new ModelOptions("first", ReasoningEffort.Medium, "test");
+        var store = new RecordingStore
+        {
+            Current = new CurrentConversation(null, session),
+        };
+        store.Sessions.Add(session);
+        var controller = CreateController(store: store);
+
+        var events = await CollectAsync(controller.ExecuteAsync(
+            new SetReasoningEffortAction(ReasoningEffort.Low)));
+
+        Assert.Equal(ReasoningEffort.Low, controller.State.Model.ReasoningEffort);
+        Assert.Equal(ReasoningEffort.Low, session.Model.ReasoningEffort);
+        Assert.Same(session, store.LastSavedSession);
+        Assert.True(session.UpdatedAtUtc > now);
+        Assert.Contains(events, item => item is AppTurnCompleted { Succeeded: true });
+    }
+
+    [Fact]
+    public async Task ImmediateEffortIsPreservedBetweenReasoningModels()
+    {
+        var controller = CreateController();
+        await CollectAsync(controller.ExecuteAsync(new SetReasoningEffortAction(null)));
+
+        await CollectAsync(controller.ExecuteAsync(new SelectModelAction("second")));
+
+        Assert.Null(controller.State.Model.ReasoningEffort);
+    }
+
+    [Fact]
+    public async Task ReasoningModelUsesMediumWhenPreviousModelHasNoEffort()
+    {
+        var models = new[]
+        {
+            Model("plain", supportsReasoning: false),
+            Model("reasoning", supportsReasoning: true),
+        };
+        var controller = new MadiController(
+            new StubAgent(static (_, _) => Task.FromResult<IReadOnlyList<AgentEvent>>([])),
+            new RecordingStore(),
+            new ModelOptions("plain", Provider: "test"),
+            models,
+            new StubAuthentication(),
+            "C:\\work");
+
+        await CollectAsync(controller.ExecuteAsync(new SelectModelAction("reasoning")));
+
+        Assert.Equal(ReasoningEffort.Medium, controller.State.Model.ReasoningEffort);
     }
 
     [Fact]
@@ -673,11 +728,12 @@ public sealed class MadiControllerTests
         authentication ?? new StubAuthentication(),
         "C:\\work");
 
-    private static AvailableModel Model(string name) => new()
+    private static AvailableModel Model(string name, bool supportsReasoning = true) => new()
     {
         Name = name,
         Provider = "test",
         Api = "test",
+        SupportsReasoning = supportsReasoning,
         MaxContextTokens = 1000,
     };
 

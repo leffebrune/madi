@@ -31,12 +31,68 @@ public sealed class TimelineViewModelTests
             ApiDuration: TimeSpan.FromMilliseconds(1500)));
 
         Assert.Equal("답변", viewModel.Timeline[1].Text);
-        Assert.Equal("API 1.25초", viewModel.Timeline[1].TimingText);
+        Assert.Equal("1.25초", viewModel.Timeline[1].TimingText);
         var tool = Assert.Single(viewModel.Timeline, item => item.Kind == TimelineItemKind.Tool);
         Assert.False(tool.IsRunning);
-        Assert.Equal("도구 240ms · API 1.5초", tool.TimingText);
+        Assert.Equal("240ms", tool.TimingText);
         Assert.Equal("file.txt", tool.Description);
         Assert.Contains("결과", tool.Details, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamsCompactToolsIntoTheirParentSubagent()
+    {
+        var viewModel = CreateViewModel();
+
+        await viewModel.ApplyExternalEventAsync(new AppSubagentStarted(
+            "subagent-1",
+            "reviewer",
+            "검토해라"));
+        await viewModel.ApplyExternalEventAsync(new AppSubagentToolStarted(
+            "subagent-1",
+            "tool-1",
+            "read",
+            "{\"path\":\"src/Main.cs\"}"));
+
+        var subagent = Assert.Single(
+            viewModel.Timeline,
+            item => item.Kind == TimelineItemKind.Subagent);
+        var tool = Assert.Single(subagent.ChildTools);
+        Assert.True(tool.IsRunning);
+        Assert.Equal("read", tool.Name);
+        Assert.Equal("src/Main.cs", tool.Description);
+
+        await viewModel.ApplyExternalEventAsync(new AppSubagentToolCompleted(
+            "subagent-1",
+            "tool-1",
+            "read",
+            IsError: false,
+            ToolDuration: TimeSpan.FromMilliseconds(75)));
+
+        Assert.False(tool.IsRunning);
+        Assert.False(tool.IsError);
+        Assert.Equal("75ms", tool.TimingText);
+    }
+
+    [Fact]
+    public async Task ChildToolIdsAreScopedToTheirParentSubagent()
+    {
+        var viewModel = CreateViewModel();
+        await viewModel.ApplyExternalEventAsync(new AppSubagentStarted("sub-1", "reviewer", "첫째"));
+        await viewModel.ApplyExternalEventAsync(new AppSubagentStarted("sub-2", "scanner", "둘째"));
+        await viewModel.ApplyExternalEventAsync(new AppSubagentToolStarted("sub-1", "tool-1", "read", "{}"));
+        await viewModel.ApplyExternalEventAsync(new AppSubagentToolStarted("sub-2", "tool-1", "grep", "{}"));
+
+        await viewModel.ApplyExternalEventAsync(new AppSubagentToolCompleted(
+            "sub-2",
+            "tool-1",
+            "grep",
+            IsError: true,
+            ToolDuration: TimeSpan.FromMilliseconds(10)));
+
+        Assert.True(viewModel.Timeline[0].ChildTools[0].IsRunning);
+        Assert.False(viewModel.Timeline[1].ChildTools[0].IsRunning);
+        Assert.True(viewModel.Timeline[1].ChildTools[0].IsError);
     }
 
     [Fact]
@@ -52,8 +108,55 @@ public sealed class TimelineViewModelTests
 
         Assert.Equal(TimelineItemKind.Assistant, viewModel.Timeline[^1].Kind);
         Assert.Equal("새 답변", viewModel.Timeline[^1].Text);
-        Assert.Equal("API 500ms", viewModel.Timeline[^1].TimingText);
+        Assert.Equal("500ms", viewModel.Timeline[^1].TimingText);
         Assert.Null(viewModel.Timeline[0].ApiDuration);
+    }
+
+    [Fact]
+    public async Task EmptyCompletionCreatesAssistantItemForApiTiming()
+    {
+        var viewModel = CreateViewModel();
+
+        await viewModel.ApplyExternalEventAsync(new AppUserInput("빈 응답"));
+        await viewModel.ApplyExternalEventAsync(new AppAssistantCompleted(
+            TimeSpan.FromMilliseconds(200)));
+
+        var assistant = Assert.IsType<TimelineItemViewModel>(viewModel.Timeline[^1]);
+        Assert.Equal(TimelineItemKind.Assistant, assistant.Kind);
+        Assert.Empty(assistant.Text);
+        Assert.Equal("200ms", assistant.TimingText);
+    }
+
+    [Fact]
+    public async Task ToolOnlyResponseDisplaysToolCallSummaryBeforeActivities()
+    {
+        var viewModel = CreateViewModel();
+
+        await viewModel.ApplyExternalEventAsync(new AppUserInput("파일 읽기"));
+        await viewModel.ApplyExternalEventAsync(new AppAssistantCompleted(
+            TimeSpan.FromMilliseconds(120),
+            "도구 호출 : read, bash"));
+        await viewModel.ApplyExternalEventAsync(new AppToolStarted("read-1", "read", "{}"));
+        await viewModel.ApplyExternalEventAsync(new AppToolStarted("bash-1", "bash", "{}"));
+
+        Assert.Equal("도구 호출 : read, bash", viewModel.Timeline[1].Text);
+        Assert.Equal("120ms", viewModel.Timeline[1].TimingText);
+        Assert.Equal(TimelineItemKind.Tool, viewModel.Timeline[2].Kind);
+        Assert.Equal(TimelineItemKind.Tool, viewModel.Timeline[3].Kind);
+    }
+
+    [Fact]
+    public async Task CompletionReplacesWhitespaceOnlyStreamedTextWithToolCallSummary()
+    {
+        var viewModel = CreateViewModel();
+
+        await viewModel.ApplyExternalEventAsync(new AppAssistantDelta("  "));
+        await viewModel.ApplyExternalEventAsync(new AppAssistantCompleted(
+            TimeSpan.FromMilliseconds(120),
+            "도구 호출 : read"));
+
+        Assert.Equal("도구 호출 : read", viewModel.Timeline[^1].Text);
+        Assert.Equal("120ms", viewModel.Timeline[^1].TimingText);
     }
 
     [Fact]
@@ -154,6 +257,22 @@ public sealed class TimelineViewModelTests
     }
 
     [Fact]
+    public async Task ReasoningEffortOptionsAreFixedAndUpdateSelectedValue()
+    {
+        var viewModel = CreateViewModel();
+        await viewModel.InitializeAsync();
+
+        Assert.Equal(["instant", "low", "medium", "high"],
+            viewModel.ReasoningEfforts.Select(item => item.Key));
+        Assert.Equal("medium", viewModel.SelectedReasoningEffortKey);
+        Assert.True(viewModel.CanSelectReasoningEffort);
+
+        await viewModel.SetReasoningEffortAsync("instant");
+
+        Assert.Equal("instant", viewModel.SelectedReasoningEffortKey);
+    }
+
+    [Fact]
     public async Task ConversationClearedRemovesDeletedTimeline()
     {
         var viewModel = CreateViewModel();
@@ -169,12 +288,13 @@ public sealed class TimelineViewModelTests
         var controller = new MadiController(
             new StubAgent(),
             new StubStore(),
-            new ModelOptions("first"),
+            new ModelOptions("first", ReasoningEffort.Medium),
             [new AvailableModel
             {
                 Name = "first",
                 Provider = "test",
                 Api = "test",
+                SupportsReasoning = true,
                 MaxContextTokens = 1000,
             }],
             new StubAuthentication(),

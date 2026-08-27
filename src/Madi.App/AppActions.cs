@@ -1,3 +1,5 @@
+using Madi.Core;
+
 namespace Madi.App;
 
 public abstract record AppAction;
@@ -7,6 +9,8 @@ public sealed record SubmitPromptAction(string Text) : AppAction;
 public sealed record ListModelsAction : AppAction;
 
 public sealed record SelectModelAction(string Model) : AppAction;
+
+public sealed record SetReasoningEffortAction(ReasoningEffort? Effort) : AppAction;
 
 public sealed record CreateSessionAction(string? WorkId = null) : AppAction;
 

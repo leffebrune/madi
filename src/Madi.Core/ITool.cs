@@ -28,4 +28,9 @@ public interface ISubagentTool : ITool
     string GetSubagentName(JsonElement arguments);
 
     string GetSubagentPrompt(JsonElement arguments);
+
+    Task<string> ExecuteAsync(
+        JsonElement arguments,
+        Func<SubagentRunEvent, ValueTask> onEvent,
+        CancellationToken cancellationToken = default);
 }

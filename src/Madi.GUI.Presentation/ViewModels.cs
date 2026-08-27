@@ -15,6 +15,53 @@ public enum TimelineItemKind
     Subagent,
 }
 
+public sealed class CompactToolActivityViewModel : ObservableObject
+{
+    private bool _isRunning = true;
+    private bool _isError;
+    private TimeSpan? _toolDuration;
+
+    public CompactToolActivityViewModel(string callId, string name, string description)
+    {
+        CallId = callId;
+        Name = name;
+        Description = description;
+    }
+
+    public string CallId { get; }
+    public string Name { get; }
+    public string Description { get; }
+    public bool HasTiming => ToolDuration is not null;
+    public string TimingText => ToolDuration is { } duration
+        ? TimelineItemViewModel.FormatDuration(duration)
+        : string.Empty;
+
+    public bool IsRunning
+    {
+        get => _isRunning;
+        set => SetProperty(ref _isRunning, value);
+    }
+
+    public bool IsError
+    {
+        get => _isError;
+        set => SetProperty(ref _isError, value);
+    }
+
+    public TimeSpan? ToolDuration
+    {
+        get => _toolDuration;
+        set
+        {
+            if (SetProperty(ref _toolDuration, value))
+            {
+                OnPropertyChanged(nameof(HasTiming));
+                OnPropertyChanged(nameof(TimingText));
+            }
+        }
+    }
+}
+
 public sealed class TimelineItemViewModel : ObservableObject
 {
     private string _text;
@@ -46,6 +93,8 @@ public sealed class TimelineItemViewModel : ObservableObject
 
     public TimelineItemKind Kind { get; }
     public string? ActivityId { get; }
+    public ObservableCollection<CompactToolActivityViewModel> ChildTools { get; } = [];
+    public bool HasChildTools => ChildTools.Count > 0;
     public string RoleLabel => Kind switch
     {
         TimelineItemKind.User => "나",
@@ -72,11 +121,11 @@ public sealed class TimelineItemViewModel : ObservableObject
             var parts = new List<string>(2);
             if (ToolDuration is { } toolDuration)
             {
-                parts.Add($"도구 {FormatDuration(toolDuration)}");
+                parts.Add(FormatDuration(toolDuration));
             }
             if (ApiDuration is { } apiDuration)
             {
-                parts.Add($"API {FormatDuration(apiDuration)}");
+                parts.Add(FormatDuration(apiDuration));
             }
             return string.Join(" · ", parts);
         }
@@ -161,7 +210,14 @@ public sealed class TimelineItemViewModel : ObservableObject
         OnPropertyChanged(nameof(TimingText));
     }
 
-    private static string FormatDuration(TimeSpan duration)
+    public void AddChildTool(CompactToolActivityViewModel tool)
+    {
+        ArgumentNullException.ThrowIfNull(tool);
+        ChildTools.Add(tool);
+        OnPropertyChanged(nameof(HasChildTools));
+    }
+
+    internal static string FormatDuration(TimeSpan duration)
     {
         if (duration.TotalMinutes >= 1)
         {
@@ -190,8 +246,14 @@ public sealed record SuggestionItemViewModel(string CompletionText, string Displ
 public sealed record ModelItemViewModel(
     string Name,
     string Provider,
-    int MaxContextTokens)
+    int MaxContextTokens,
+    bool SupportsReasoning)
 {
     public string Key => $"{Provider}/{Name}";
     public string DisplayName => Key;
 }
+
+public sealed record ReasoningEffortItemViewModel(
+    string Key,
+    string DisplayName,
+    ReasoningEffort? Value);

@@ -185,7 +185,7 @@ public sealed class BashTool : ITool
         // Bundled utilities (rg, fd, etc.) take precedence over the host PATH.
         var pathKey = info.Environment.Keys.FirstOrDefault(
             key => key.Equals("PATH", StringComparison.OrdinalIgnoreCase)) ?? "PATH";
-        var bundledBins = GetBundledBinDirectories();
+        var bundledBins = ExecutableResolver.GetBundledBinDirectories(_utilityBinDirectory);
         var currentPath = info.Environment.TryGetValue(pathKey, out var value) ? value : string.Empty;
         info.Environment[pathKey] = string.Join(
             Path.PathSeparator,
@@ -203,7 +203,9 @@ public sealed class BashTool : ITool
                 : throw new FileNotFoundException($"Custom shell path not found: {explicitPath}", explicitPath);
         }
 
-        var bundled = FindExecutable(string.Join(Path.PathSeparator, GetBundledBinDirectories()), "bash");
+        var bundled = ExecutableResolver.Find(
+            string.Join(Path.PathSeparator, ExecutableResolver.GetBundledBinDirectories(_utilityBinDirectory)),
+            "bash");
         if (bundled is not null)
         {
             return bundled;
@@ -231,7 +233,7 @@ public sealed class BashTool : ITool
             return "/bin/bash";
         }
 
-        var onPath = FindExecutable(Environment.GetEnvironmentVariable("PATH"), "bash");
+        var onPath = ExecutableResolver.Find(Environment.GetEnvironmentVariable("PATH"), "bash");
         if (onPath is not null)
         {
             return onPath;
@@ -242,43 +244,6 @@ public sealed class BashTool : ITool
         }
 
         throw new FileNotFoundException("No bash shell found. Install Bash, add it to PATH, or provide shellPath.");
-    }
-
-    private static string? FindExecutable(string? searchPath, string name)
-    {
-        if (string.IsNullOrWhiteSpace(searchPath))
-        {
-            return null;
-        }
-
-        var names = OperatingSystem.IsWindows() ? new[] { $"{name}.exe", name } : new[] { name };
-        foreach (var directory in searchPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            foreach (var fileName in names)
-            {
-                var candidate = Path.Combine(directory.Trim('"'), fileName);
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
-            }
-        }
-        return null;
-    }
-
-    private IEnumerable<string> GetBundledBinDirectories()
-    {
-        // Environment.CurrentDirectory is the launch location in normal CLI use;
-        // AppContext.BaseDirectory also supports self-contained/published layouts.
-        return new[]
-        {
-            _utilityBinDirectory,
-            Path.Combine(Environment.CurrentDirectory, "bin"),
-            Path.Combine(AppContext.BaseDirectory, "bin"),
-        }
-        .Where(static path => !string.IsNullOrWhiteSpace(path))
-        .Select(static path => path!)
-        .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     }
 
     private static async Task CaptureAsync(StreamReader reader, StringBuilder output, object outputLock)

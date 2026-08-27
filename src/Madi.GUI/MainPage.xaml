@@ -48,6 +48,7 @@
 
         <DataTemplate x:Key="TimelineTemplate" x:DataType="presentation:TimelineItemViewModel">
             <Border Width="1200"
+                    CanBeScrollAnchor="True"
                     Margin="12,5"
                     Padding="14,10"
                     CornerRadius="10"
@@ -120,6 +121,56 @@
                     <local:MarkdownView Margin="0,8,0,0"
                                         Markdown="{Binding Details}"
                                         Visibility="{Binding IsActivityExpanded, Converter={StaticResource BoolToVisibility}}" />
+                    <StackPanel Margin="0,4,0,0"
+                                Spacing="6"
+                                Visibility="{Binding IsActivityExpanded, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="호출한 도구"
+                                   FontWeight="SemiBold"
+                                   Visibility="{Binding HasChildTools, Converter={StaticResource BoolToVisibility}}" />
+                        <ItemsControl ItemsSource="{Binding ChildTools}"
+                                      Visibility="{Binding HasChildTools, Converter={StaticResource BoolToVisibility}}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="presentation:CompactToolActivityViewModel">
+                                    <Grid Padding="8,4"
+                                          ColumnSpacing="6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <ProgressRing Width="14"
+                                                      Height="14"
+                                                      VerticalAlignment="Top"
+                                                      IsActive="{Binding IsRunning}"
+                                                      Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}}" />
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding Name}"
+                                                   FontWeight="SemiBold"
+                                                   IsTextSelectionEnabled="True" />
+                                        <TextBlock Grid.Column="2" Text="—" />
+                                        <TextBlock Grid.Column="3"
+                                                   Text="{Binding Description}"
+                                                   TextWrapping="Wrap"
+                                                   IsTextSelectionEnabled="True" />
+                                        <TextBlock Grid.Column="4"
+                                                   Margin="6,0,0,0"
+                                                   Text="실패"
+                                                   Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                                   Visibility="{Binding IsError, Converter={StaticResource BoolToVisibility}}" />
+                                        <TextBlock Grid.Column="5"
+                                                   Margin="6,0,0,0"
+                                                   Text="{Binding TimingText}"
+                                                   FontSize="12"
+                                                   Opacity="0.65"
+                                                   Visibility="{Binding HasTiming, Converter={StaticResource BoolToVisibility}}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
                     <Expander Header="상세"
                               Visibility="{Binding ShowsStandaloneDetails, Converter={StaticResource BoolToVisibility}}">
                         <local:MarkdownView Margin="0,8,0,0" Markdown="{Binding Details}" />
@@ -210,6 +261,7 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="240" />
+                            <ColumnDefinition Width="120" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
@@ -228,13 +280,22 @@
                                   IsEnabled="{Binding CanInteract}"
                                   Header="모델"
                                   AutomationProperties.Name="모델 선택" />
-                        <Button Grid.Column="2"
+                        <ComboBox x:Name="ReasoningEffortSelector" Grid.Column="2"
+                                  ItemsSource="{Binding ReasoningEfforts}"
+                                  DisplayMemberPath="DisplayName"
+                                  SelectedValuePath="Key"
+                                  SelectedValue="{Binding SelectedReasoningEffortKey, Mode=OneWay}"
+                                  SelectionChanged="OnReasoningEffortSelectionChanged"
+                                  IsEnabled="{Binding CanSelectReasoningEffort}"
+                                  Header="추론 수준"
+                                  AutomationProperties.Name="추론 수준 선택" />
+                        <Button Grid.Column="3"
                                 Content="{Binding AuthenticationLabel}"
                                 Click="OnToggleAuthentication"
                                 IsEnabled="{Binding CanToggleAuthentication}"
                                 VerticalAlignment="Bottom"
                                 AutomationProperties.Name="로그인 상태" />
-                        <Button Grid.Column="3"
+                        <Button Grid.Column="4"
                                 Click="OnToolsMenu"
                                 IsEnabled="{Binding CanInteract}"
                                 VerticalAlignment="Bottom"
@@ -265,6 +326,7 @@
 
                 <Grid Grid.Row="2">
                     <ScrollViewer x:Name="TimelineScroller"
+                                  VerticalAnchorRatio="0"
                                   IsTabStop="True"
                                   AllowFocusOnInteraction="True"
                                   UseSystemFocusVisuals="False"
@@ -273,6 +335,7 @@
                                   VerticalScrollMode="Enabled"
                                   VerticalScrollBarVisibility="Auto"
                                   PreviewKeyDown="OnTimelinePreviewKeyDown"
+                                  PointerWheelChanged="OnTimelinePointerWheelChanged"
                                   ViewChanged="OnTimelineViewChanged"
                                   AutomationProperties.Name="대화 타임라인">
                         <ItemsRepeater ItemsSource="{Binding Timeline}"

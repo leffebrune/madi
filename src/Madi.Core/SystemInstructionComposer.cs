@@ -26,6 +26,11 @@ public static class SystemInstructionComposer
         output.AppendLine("# Available tools");
         output.AppendLine();
         output.AppendLine("Use the following tools when they help complete the user's request.");
+        if (tools.Any(static tool => tool.Name == "grep")
+            && tools.Any(static tool => tool.Name == "find"))
+        {
+            output.AppendLine("When searching file contents or locating files, use grep or find instead of bash.");
+        }
 
         foreach (var tool in tools)
         {

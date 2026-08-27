@@ -7,7 +7,7 @@ namespace Madi.Runtime.Providers;
 /// <summary>Accesses an OpenAI-compatible Responses API with API key authentication.</summary>
 public sealed class OpenAIResponseProvider : IModelProvider
 {
-    public const string ProviderId = "openai-response";
+    public const string ProviderId = "openai-responses";
 
     private readonly INetworkClient _client;
 

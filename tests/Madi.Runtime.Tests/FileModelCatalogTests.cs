@@ -76,7 +76,7 @@ public sealed class FileModelCatalogTests
             [
               {
                 "provider": "OpenAI API",
-                "api": "openai-response",
+                "api": "openai-responses",
                 "baseUrl": "https://api.openai.com/v1",
                 "apiKey": "sk-direct-key",
                 "models": [

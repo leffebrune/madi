@@ -20,6 +20,8 @@ public sealed class ActivityDescriptionFormatter : IActivityDescriptionFormatter
         ToolFormatters = new Dictionary<string, Func<JsonElement, string>>(StringComparer.Ordinal)
         {
             ["bash"] = static arguments => GetString(arguments, "command"),
+            ["grep"] = static arguments => FormatSearch(arguments),
+            ["find"] = static arguments => FormatSearch(arguments),
             ["read"] = static arguments => FormatRead(arguments),
             ["write"] = static arguments => GetString(arguments, "path"),
             ["edit"] = static arguments => FormatEdit(arguments),
@@ -51,6 +53,15 @@ public sealed class ActivityDescriptionFormatter : IActivityDescriptionFormatter
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         return prompt ?? throw new ArgumentNullException(nameof(prompt));
+    }
+
+    private static string FormatSearch(JsonElement arguments)
+    {
+        var pattern = GetString(arguments, "pattern");
+        var path = GetString(arguments, "path");
+        return string.IsNullOrEmpty(path)
+            ? pattern
+            : $"{pattern}{Environment.NewLine}{path}";
     }
 
     private static string FormatRead(JsonElement arguments)
