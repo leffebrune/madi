@@ -76,6 +76,10 @@ public sealed class WorkPromptTests
         var tool = Assert.Single(events.OfType<AgentToolExecutionCompleted>());
         Assert.True(tool.ApiDuration >= TimeSpan.FromMilliseconds(20));
         Assert.True(tool.ToolDuration >= TimeSpan.FromMilliseconds(20));
+        var toolCallResponse = Assert.Single(events.OfType<AgentAssistantCompleted>());
+        Assert.Equal("도구 호출 : timed", toolCallResponse.Text);
+        Assert.True(toolCallResponse.ApiDuration >= TimeSpan.FromMilliseconds(20));
+        Assert.True(events.IndexOf(toolCallResponse) < events.IndexOf(tool));
         var answer = Assert.Single(events.OfType<AgentResponseCompleted>());
         Assert.True(answer.ApiDuration >= TimeSpan.FromMilliseconds(20));
     }

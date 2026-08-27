@@ -35,10 +35,12 @@ public sealed class FileSubagentCatalog : ISubagentCatalog
             model: OpenAI/gpt-5.6-luna:high
             tools:
               - read
-              - bash
+              - grep
+              - find
             ---
 
             You are a code review specialist.
+            Use grep for content searches and find for locating files.
 
             Inspect the changes and the surrounding code without modifying files. Prioritize concrete defects and regression risks over stylistic preferences.
 
@@ -58,10 +60,12 @@ public sealed class FileSubagentCatalog : ISubagentCatalog
             model: OpenAI/gpt-5.6-luna:medium
             tools:
               - read
-              - bash
+              - grep
+              - find
             ---
 
             You are a codebase exploration specialist.
+            Use grep for content searches and find for locating files.
 
             Investigate the user's request without modifying files. Find the relevant code, trace how it works, and identify the smallest set of change points.
 
@@ -101,11 +105,19 @@ public sealed class FileSubagentCatalog : ISubagentCatalog
                 item.FileName,
                 Path.GetFileName(path),
                 StringComparison.Ordinal));
-            if (defaultTemplate != default
-                && string.Equals(content, defaultTemplate.Content, StringComparison.Ordinal))
+            if (defaultTemplate != default)
             {
-                content = ConfigureDefaultContent(content);
-                await File.WriteAllTextAsync(path, content, cancellationToken);
+                var previousContent = GetPreviousDefaultContent(defaultTemplate.Content);
+                var legacyContent = GetLegacyDefaultContent(previousContent);
+                if (ContentEquals(content, defaultTemplate.Content)
+                    || ContentEquals(content, previousContent)
+                    || ContentEquals(content, ConfigureDefaultContent(previousContent))
+                    || ContentEquals(content, legacyContent)
+                    || ContentEquals(content, ConfigureDefaultContent(legacyContent)))
+                {
+                    content = ConfigureDefaultContent(defaultTemplate.Content);
+                    await File.WriteAllTextAsync(path, content, cancellationToken);
+                }
             }
             var definition = Parse(path, content);
             if (!string.Equals(
@@ -132,6 +144,26 @@ public sealed class FileSubagentCatalog : ISubagentCatalog
     private string ConfigureDefaultContent(string content) => content.Replace(
         "model: OpenAI/gpt-5.6-luna:",
         $"model: {_defaultModel}:",
+        StringComparison.Ordinal);
+
+    private static string GetPreviousDefaultContent(string content) => content
+        .ReplaceLineEndings("\n")
+        .Replace("  - find\n", "  - find\n  - bash\n", StringComparison.Ordinal)
+        .Replace(
+            "\nUse grep for content searches and find for locating files.",
+            "\nUse grep for content searches and find for locating files; do not use bash for those tasks.",
+            StringComparison.Ordinal);
+
+    private static string GetLegacyDefaultContent(string content) => content
+        .Replace("  - grep\n  - find\n", string.Empty, StringComparison.Ordinal)
+        .Replace(
+            "\nUse grep for content searches and find for locating files; do not use bash for those tasks.",
+            string.Empty,
+            StringComparison.Ordinal);
+
+    private static bool ContentEquals(string left, string right) => string.Equals(
+        left.ReplaceLineEndings("\n"),
+        right.ReplaceLineEndings("\n"),
         StringComparison.Ordinal);
 
     private SubagentDefinition Parse(string path, string content)

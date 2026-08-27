@@ -34,6 +34,19 @@ public sealed record AgentSubagentCompleted(
     TimeSpan ToolDuration = default,
     TimeSpan ApiDuration = default) : AgentEvent;
 
+public sealed record AgentSubagentToolStarted(
+    string SubagentCallId,
+    string ToolCallId,
+    string Name,
+    string Arguments) : AgentEvent;
+
+public sealed record AgentSubagentToolCompleted(
+    string SubagentCallId,
+    string ToolCallId,
+    string Name,
+    bool IsError,
+    TimeSpan ToolDuration = default) : AgentEvent;
+
 public sealed record AgentUsageReported(ModelUsage Usage) : AgentEvent;
 
 public sealed record AgentAssistantCompleted(

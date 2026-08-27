@@ -17,6 +17,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _workingDirectory;
     private string _authenticationLabel = "확인 중";
     private string? _selectedModelName;
+    private string? _selectedReasoningEffortKey;
     private string? _currentWorkId;
     private string _currentWorkPrompt = string.Empty;
     private string _workPromptDraft = string.Empty;
@@ -42,8 +43,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             Models.Add(new ModelItemViewModel(
                 model.Name,
                 model.Provider,
-                model.MaxContextTokens));
+                model.MaxContextTokens,
+                model.SupportsReasoning));
         }
+
+        ReasoningEfforts.Add(new ReasoningEffortItemViewModel("instant", "즉시", null));
+        ReasoningEfforts.Add(new ReasoningEffortItemViewModel("low", "낮음", ReasoningEffort.Low));
+        ReasoningEfforts.Add(new ReasoningEffortItemViewModel("medium", "중간", ReasoningEffort.Medium));
+        ReasoningEfforts.Add(new ReasoningEffortItemViewModel("high", "높음", ReasoningEffort.High));
     }
 
     public event EventHandler? TimelineChanged;
@@ -53,6 +60,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<NavigationItemViewModel> NavigationItems { get; } = [];
     public ObservableCollection<SuggestionItemViewModel> Suggestions { get; } = [];
     public ObservableCollection<ModelItemViewModel> Models { get; } = [];
+    public ObservableCollection<ReasoningEffortItemViewModel> ReasoningEfforts { get; } = [];
 
     public int LegacyItemCount { get; private set; }
 
@@ -91,7 +99,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string? SelectedModelName
     {
         get => _selectedModelName;
-        private set => SetProperty(ref _selectedModelName, value);
+        private set
+        {
+            if (SetProperty(ref _selectedModelName, value))
+            {
+                OnPropertyChanged(nameof(CanSelectReasoningEffort));
+            }
+        }
+    }
+
+    public string? SelectedReasoningEffortKey
+    {
+        get => _selectedReasoningEffortKey;
+        private set => SetProperty(ref _selectedReasoningEffortKey, value);
     }
 
     public string? CurrentWorkId
@@ -168,12 +188,18 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(CanSaveWorkPrompt));
                 OnPropertyChanged(nameof(SendButtonText));
                 OnPropertyChanged(nameof(CanToggleAuthentication));
+                OnPropertyChanged(nameof(CanSelectReasoningEffort));
             }
         }
     }
 
     public bool CanInteract => !IsBusy;
     public bool CanToggleAuthentication => CanInteract && _supportsOAuth;
+    public bool CanSelectReasoningEffort => CanInteract
+        && Models.FirstOrDefault(model => string.Equals(
+            model.Key,
+            SelectedModelName,
+            StringComparison.OrdinalIgnoreCase))?.SupportsReasoning == true;
     public string SendButtonText => IsBusy ? "취소" : "전송";
 
     public bool IsSignedIn
@@ -219,6 +245,18 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         string.Equals(model, SelectedModelName, StringComparison.OrdinalIgnoreCase)
             ? Task.CompletedTask
             : ExecuteAsync(new SelectModelAction(model));
+
+    public Task SetReasoningEffortAsync(string key)
+    {
+        var item = ReasoningEfforts.FirstOrDefault(item =>
+            string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase));
+        return item is null || string.Equals(
+                item.Key,
+                SelectedReasoningEffortKey,
+                StringComparison.OrdinalIgnoreCase)
+            ? Task.CompletedTask
+            : ExecuteAsync(new SetReasoningEffortAction(item.Value));
+    }
 
     public Task CreateSessionAsync(string? workId = null) =>
         ExecuteAsync(new CreateSessionAction(workId));
@@ -349,10 +387,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 {
                     _submittedDraft = null;
                 }
-                else if (Draft.Length == 0 && _submittedDraft is not null)
+                else
                 {
-                    Draft = _submittedDraft;
-                    _submittedDraft = null;
+                    StopRunningChildTools(markAsError: !completed.Canceled);
+                    if (Draft.Length == 0 && _submittedDraft is not null)
+                    {
+                        Draft = _submittedDraft;
+                        _submittedDraft = null;
+                    }
                 }
                 break;
             case AppAssistantDelta delta:
@@ -369,15 +411,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 var completedAssistant = Timeline.LastOrDefault();
                 if (completedAssistant?.Kind != TimelineItemKind.Assistant)
                 {
-                    if (string.IsNullOrEmpty(completed.Text))
-                    {
-                        break;
-                    }
-
                     completedAssistant = new TimelineItemViewModel(
                         TimelineItemKind.Assistant,
                         completed.Text);
                     Timeline.Add(completedAssistant);
+                }
+                else if (string.IsNullOrWhiteSpace(completedAssistant.Text)
+                    && !string.IsNullOrWhiteSpace(completed.Text))
+                {
+                    completedAssistant.Text = completed.Text;
                 }
                 completedAssistant.ApiDuration = completed.ApiDuration > TimeSpan.Zero
                     ? completed.ApiDuration
@@ -398,8 +440,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                     tool.Name,
                     $"### 인자\n```json\n{tool.Arguments}\n```\n\n### 결과\n```text\n{tool.Result}\n```",
                     tool.IsError,
-                    tool.ToolDuration,
-                    tool.ApiDuration);
+                    tool.ToolDuration);
                 break;
             case AppSubagentStarted subagent:
                 Timeline.Add(new TimelineItemViewModel(
@@ -418,8 +459,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                     subagent.Name,
                     $"### 프롬프트\n{subagent.Prompt}\n\n### 결과\n{subagent.Response}",
                     subagent.IsError,
-                    subagent.ToolDuration,
-                    subagent.ApiDuration);
+                    subagent.ToolDuration);
+                break;
+            case AppSubagentToolStarted tool:
+                AddSubagentTool(tool);
+                break;
+            case AppSubagentToolCompleted tool:
+                CompleteSubagentTool(tool);
                 break;
             case AppUsageReported usage:
                 UsageText = FormatUsage(usage.Usage);
@@ -460,6 +506,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         IsBusy = state.IsBusy;
         SelectedModelName = state.Model.QualifiedName;
+        SelectedReasoningEffortKey = state.Model.ReasoningEffort switch
+        {
+            null => "instant",
+            ReasoningEffort.Low => "low",
+            ReasoningEffort.Medium => "medium",
+            ReasoningEffort.High => "high",
+            _ => null,
+        };
 
         var nextWorkId = state.Work?.Id;
         var workChanged = !string.Equals(CurrentWorkId, nextWorkId, StringComparison.Ordinal);
@@ -574,8 +628,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         string text,
         string details,
         bool isError,
-        TimeSpan toolDuration,
-        TimeSpan apiDuration)
+        TimeSpan toolDuration)
     {
         var activity = Timeline.LastOrDefault(entry =>
             string.Equals(entry.ActivityId, callId, StringComparison.Ordinal));
@@ -589,7 +642,59 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         activity.IsRunning = false;
         activity.IsError = isError;
         activity.ToolDuration = toolDuration > TimeSpan.Zero ? toolDuration : null;
-        activity.ApiDuration = apiDuration > TimeSpan.Zero ? apiDuration : null;
+        foreach (var childTool in activity.ChildTools.Where(static tool => tool.IsRunning))
+        {
+            childTool.IsRunning = false;
+            childTool.IsError = isError;
+        }
+    }
+
+    private void AddSubagentTool(AppSubagentToolStarted tool)
+    {
+        var subagent = Timeline.LastOrDefault(entry =>
+            entry.Kind == TimelineItemKind.Subagent
+            && string.Equals(entry.ActivityId, tool.SubagentCallId, StringComparison.Ordinal));
+        if (subagent is null
+            || subagent.ChildTools.Any(child =>
+                string.Equals(child.CallId, tool.ToolCallId, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        subagent.AddChildTool(new CompactToolActivityViewModel(
+            tool.ToolCallId,
+            tool.Name,
+            _activityDescriptionFormatter.FormatTool(tool.Name, tool.Arguments)));
+    }
+
+    private void CompleteSubagentTool(AppSubagentToolCompleted tool)
+    {
+        var subagent = Timeline.LastOrDefault(entry =>
+            entry.Kind == TimelineItemKind.Subagent
+            && string.Equals(entry.ActivityId, tool.SubagentCallId, StringComparison.Ordinal));
+        var childTool = subagent?.ChildTools.LastOrDefault(child =>
+            string.Equals(child.CallId, tool.ToolCallId, StringComparison.Ordinal));
+        if (childTool is null)
+        {
+            return;
+        }
+
+        childTool.IsRunning = false;
+        childTool.IsError = tool.IsError;
+        childTool.ToolDuration = tool.ToolDuration > TimeSpan.Zero
+            ? tool.ToolDuration
+            : null;
+    }
+
+    private void StopRunningChildTools(bool markAsError)
+    {
+        foreach (var childTool in Timeline
+            .SelectMany(static entry => entry.ChildTools)
+            .Where(static tool => tool.IsRunning))
+        {
+            childTool.IsRunning = false;
+            childTool.IsError = markAsError;
+        }
     }
 
     private async Task RefreshSuggestionsAsync(string input)

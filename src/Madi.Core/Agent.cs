@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Threading.Channels;
 
 namespace Madi.Core;
 
@@ -108,10 +109,10 @@ public sealed class Agent : IAgent
             var toolCalls = response.Output.OfType<ModelToolCall>().ToArray();
             if (toolCalls.Length > 0)
             {
-                if (!string.IsNullOrEmpty(response.OutputText))
-                {
-                    yield return new AgentAssistantCompleted(response.OutputText, apiDuration);
-                }
+                var assistantText = string.IsNullOrWhiteSpace(response.OutputText)
+                    ? $"도구 호출 : {string.Join(", ", toolCalls.Select(static call => call.Name))}"
+                    : response.OutputText;
+                yield return new AgentAssistantCompleted(assistantText, apiDuration);
 
                 foreach (var toolCall in toolCalls.Where(call => !IsSubagentTool(call.Name)))
                 {
@@ -146,44 +147,52 @@ public sealed class Agent : IAgent
                     }
                 }
 
+                var updates = Channel.CreateUnbounded<ToolExecutionUpdate>(
+                    new UnboundedChannelOptions { SingleReader = true });
                 var executions = toolCalls
-                    .Select((call, index) => new PendingToolExecution(
+                    .Select((call, index) => ExecuteAndPublishAsync(
                         index,
                         call,
-                        ExecuteToolAsync(call, cancellationToken)))
-                    .ToList();
+                        updates.Writer,
+                        cancellationToken))
+                    .ToArray();
                 var results = new ToolExecutionResult[toolCalls.Length];
-                while (executions.Count > 0)
+                var completedCount = 0;
+                while (completedCount < toolCalls.Length)
                 {
-                    var completedTask = await Task.WhenAny(
-                        executions.Select(static execution => execution.Task));
-                    var completedIndex = executions.FindIndex(
-                        execution => ReferenceEquals(execution.Task, completedTask));
-                    var execution = executions[completedIndex];
-                    executions.RemoveAt(completedIndex);
-                    var result = await completedTask;
-                    results[execution.Index] = result;
-                    if (GetSubagentName(execution.Call) is { } subagentName)
+                    var update = await updates.Reader.ReadAsync(cancellationToken);
+                    if (update is ToolExecutionProgress progress)
+                    {
+                        yield return progress.Event;
+                        continue;
+                    }
+
+                    var completed = (ToolExecutionFinished)update;
+                    completedCount++;
+                    results[completed.Index] = completed.Result;
+                    var call = toolCalls[completed.Index];
+                    if (GetSubagentName(call) is { } subagentName)
                     {
                         yield return new AgentSubagentCompleted(
-                            execution.Call.CallId,
+                            call.CallId,
                             subagentName,
-                            result.Output,
-                            result.IsError,
-                            result.Duration,
+                            completed.Result.Output,
+                            completed.Result.IsError,
+                            completed.Result.Duration,
                             apiDuration);
                     }
                     else
                     {
                         yield return new AgentToolExecutionCompleted(
-                            execution.Call.CallId,
-                            execution.Call.Name,
-                            result.Output,
-                            result.IsError,
-                            result.Duration,
+                            call.CallId,
+                            call.Name,
+                            completed.Result.Output,
+                            completed.Result.IsError,
+                            completed.Result.Duration,
                             apiDuration);
                     }
                 }
+                await Task.WhenAll(executions);
 
                 for (var index = 0; index < toolCalls.Length; index++)
                 {
@@ -207,7 +216,27 @@ public sealed class Agent : IAgent
                             subagentPrompt);
                     }
 
-                    var result = await ExecuteToolAsync(toolCall, cancellationToken);
+                    var updates = Channel.CreateUnbounded<ToolExecutionUpdate>(
+                        new UnboundedChannelOptions { SingleReader = true });
+                    var execution = ExecuteAndPublishAsync(
+                        0,
+                        toolCall,
+                        updates.Writer,
+                        cancellationToken);
+                    ToolExecutionResult? result = null;
+                    while (result is null)
+                    {
+                        var update = await updates.Reader.ReadAsync(cancellationToken);
+                        if (update is ToolExecutionProgress progress)
+                        {
+                            yield return progress.Event;
+                        }
+                        else
+                        {
+                            result = ((ToolExecutionFinished)update).Result;
+                        }
+                    }
+                    await execution;
                     pendingConversation.Add(new ToolResult(
                         toolCall.CallId,
                         result.Output,
@@ -261,8 +290,26 @@ public sealed class Agent : IAgent
     private static string? GetWorkInstructions(Work? work) =>
         string.IsNullOrWhiteSpace(work?.Context) ? null : work.Context.Trim();
 
+    private async Task ExecuteAndPublishAsync(
+        int index,
+        ModelToolCall call,
+        ChannelWriter<ToolExecutionUpdate> writer,
+        CancellationToken cancellationToken)
+    {
+        var result = await ExecuteToolAsync(
+            call,
+            item => writer.WriteAsync(
+                new ToolExecutionProgress(item),
+                cancellationToken),
+            cancellationToken);
+        await writer.WriteAsync(
+            new ToolExecutionFinished(index, result),
+            cancellationToken);
+    }
+
     private async Task<ToolExecutionResult> ExecuteToolAsync(
         ModelToolCall call,
+        Func<AgentEvent, ValueTask> onEvent,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -274,7 +321,12 @@ public sealed class Agent : IAgent
         try
         {
             using var arguments = JsonDocument.Parse(call.Arguments);
-            var output = await tool.ExecuteAsync(arguments.RootElement, cancellationToken);
+            var output = tool is ISubagentTool subagentTool
+                ? await subagentTool.ExecuteAsync(
+                    arguments.RootElement,
+                    item => onEvent(MapSubagentEvent(call.CallId, item)),
+                    cancellationToken)
+                : await tool.ExecuteAsync(arguments.RootElement, cancellationToken);
             return ToolExecutionResult.Success(output, stopwatch.Elapsed);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -294,6 +346,24 @@ public sealed class Agent : IAgent
                 stopwatch.Elapsed);
         }
     }
+
+    private static AgentEvent MapSubagentEvent(
+        string subagentCallId,
+        SubagentRunEvent item) => item switch
+    {
+        SubagentToolStarted started => new AgentSubagentToolStarted(
+            subagentCallId,
+            started.CallId,
+            started.Name,
+            started.Arguments),
+        SubagentToolCompleted completed => new AgentSubagentToolCompleted(
+            subagentCallId,
+            completed.CallId,
+            completed.Name,
+            completed.IsError,
+            completed.ToolDuration),
+        _ => throw new ArgumentOutOfRangeException(nameof(item)),
+    };
 
     private bool CanRunInParallel(ModelToolCall call) =>
         _toolsByName.TryGetValue(call.Name, out var tool)
@@ -341,10 +411,13 @@ public sealed class Agent : IAgent
         }
     }
 
-    private sealed record PendingToolExecution(
+    private abstract record ToolExecutionUpdate;
+
+    private sealed record ToolExecutionProgress(AgentEvent Event) : ToolExecutionUpdate;
+
+    private sealed record ToolExecutionFinished(
         int Index,
-        ModelToolCall Call,
-        Task<ToolExecutionResult> Task);
+        ToolExecutionResult Result) : ToolExecutionUpdate;
 
     private sealed record ToolExecutionResult(
         string Output,

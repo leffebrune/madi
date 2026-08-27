@@ -39,6 +39,16 @@ public sealed class SubagentTool : ISubagentTool
             GetSubagentPrompt(arguments),
             cancellationToken);
 
+    public Task<string> ExecuteAsync(
+        JsonElement arguments,
+        Func<SubagentRunEvent, ValueTask> onEvent,
+        CancellationToken cancellationToken = default) =>
+        _runner.RunAsync(
+            GetSubagentName(arguments),
+            GetSubagentPrompt(arguments),
+            onEvent,
+            cancellationToken);
+
     private static string CreateDescription(IReadOnlyList<SubagentDefinition> definitions)
     {
         var lines = definitions.Select(

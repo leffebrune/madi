@@ -31,6 +31,24 @@ public sealed class SystemInstructionComposerTests
     }
 
     [Fact]
+    public void ComposePrefersDedicatedSearchToolsOverBash()
+    {
+        var schema = """{"type":"object","properties":{}}""";
+        var tools = new[]
+        {
+            new TestTool("grep", "Search contents.", schema),
+            new TestTool("find", "Find files.", schema),
+            new TestTool("bash", "Run commands.", schema),
+        };
+
+        var result = SystemInstructionComposer.Compose("You are Madi.", tools);
+
+        Assert.Contains(
+            "When searching file contents or locating files, use grep or find instead of bash.",
+            result);
+    }
+
+    [Fact]
     public void ComposeWithoutToolsReturnsTrimmedSystemMarkdown()
     {
         Assert.Equal(

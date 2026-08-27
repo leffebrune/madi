@@ -58,10 +58,27 @@ public sealed class SubagentRunner : ISubagentRunner
         }
     }
 
-    public async Task<string> RunAsync(
+    public Task<string> RunAsync(
         string name,
         string task,
+        CancellationToken cancellationToken = default) =>
+        RunCoreAsync(name, task, onEvent: null, cancellationToken);
+
+    public Task<string> RunAsync(
+        string name,
+        string task,
+        Func<SubagentRunEvent, ValueTask> onEvent,
         CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(onEvent);
+        return RunCoreAsync(name, task, onEvent, cancellationToken);
+    }
+
+    private async Task<string> RunCoreAsync(
+        string name,
+        string task,
+        Func<SubagentRunEvent, ValueTask>? onEvent,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(task);
@@ -104,9 +121,24 @@ public sealed class SubagentRunner : ISubagentRunner
                 task,
                 cancellationToken))
             {
-                if (item is AgentResponseCompleted completed)
+                switch (item)
                 {
-                    result = completed.Text;
+                    case AgentToolCallCompleted started when onEvent is not null:
+                        await onEvent(new SubagentToolStarted(
+                            started.CallId,
+                            started.Name,
+                            started.Arguments));
+                        break;
+                    case AgentToolExecutionCompleted completed when onEvent is not null:
+                        await onEvent(new SubagentToolCompleted(
+                            completed.CallId,
+                            completed.Name,
+                            completed.IsError,
+                            completed.ToolDuration));
+                        break;
+                    case AgentResponseCompleted completed:
+                        result = completed.Text;
+                        break;
                 }
             }
 

@@ -11,9 +11,13 @@ public sealed class ActivityDescriptionFormatterTests
         var formatter = new ActivityDescriptionFormatter();
 
         var bash = formatter.FormatTool("bash", """{"command":"echo first\necho second"}""");
+        var grep = formatter.FormatTool("grep", """{"pattern":"needle","path":"src"}""");
+        var find = formatter.FormatTool("find", """{"pattern":"*.cs"}""");
         var read = formatter.FormatTool("read", """{"path":"src/Main.cs","offset":10,"limit":20}""");
 
         Assert.Equal("echo first\necho second", bash);
+        Assert.Equal($"needle{Environment.NewLine}src", grep);
+        Assert.Equal("*.cs", find);
         Assert.Equal($"src/Main.cs{Environment.NewLine}offset 10 · limit 20", read);
     }
 

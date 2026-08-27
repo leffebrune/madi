@@ -35,7 +35,9 @@ public sealed class MadiController
         ArgumentNullException.ThrowIfNull(defaultModel);
         _availableModels = availableModels ?? throw new ArgumentNullException(nameof(availableModels));
         _authentication = authentication ?? throw new ArgumentNullException(nameof(authentication));
-        _selectedModel = _authentication.ResolveModel(defaultModel);
+        _selectedModel = NormalizeReasoningEffort(
+            _authentication.ResolveModel(defaultModel),
+            useMediumDefault: true);
         _workingDirectory = Path.GetFullPath(workingDirectory ?? Environment.CurrentDirectory);
         Commands = CreateCommandCatalog();
     }
@@ -85,7 +87,7 @@ public sealed class MadiController
         }
 
         _selectedModel = _currentSession is null
-            ? _authentication.ResolveModel(_selectedModel)
+            ? NormalizeReasoningEffort(_authentication.ResolveModel(_selectedModel))
             : ResolvePersistedModel(_currentSession);
         if (_currentSession is not null && _currentSession.Model != _selectedModel)
         {
@@ -285,6 +287,9 @@ public sealed class MadiController
         {
             ListModelsAction => ListModelsAsync(string.Empty, cancellationToken),
             SelectModelAction select => SelectModelAsync(select.Model, cancellationToken),
+            SetReasoningEffortAction setEffort => SetReasoningEffortAsync(
+                setEffort.Effort,
+                cancellationToken),
             CreateSessionAction create => CreateSessionForWorkAsync(
                 create.WorkId,
                 cancellationToken),
@@ -389,6 +394,21 @@ public sealed class MadiController
                             result.IsError,
                             result.ToolDuration,
                             result.ApiDuration);
+                        break;
+                    case AgentSubagentToolStarted started:
+                        yield return new AppSubagentToolStarted(
+                            started.SubagentCallId,
+                            started.ToolCallId,
+                            started.Name,
+                            started.Arguments);
+                        break;
+                    case AgentSubagentToolCompleted completed:
+                        yield return new AppSubagentToolCompleted(
+                            completed.SubagentCallId,
+                            completed.ToolCallId,
+                            completed.Name,
+                            completed.IsError,
+                            completed.ToolDuration);
                         break;
                     case AgentUsageReported usage:
                         yield return new AppUsageReported(usage.Usage);
@@ -558,7 +578,11 @@ public sealed class MadiController
 
         _selectedModel = new ModelOptions(
             model.Name,
-            model.SupportsReasoning ? _selectedModel.ReasoningEffort : null,
+            model.SupportsReasoning
+                ? currentModel?.SupportsReasoning == true
+                    ? _selectedModel.ReasoningEffort
+                    : ReasoningEffort.Medium
+                : null,
             model.Provider);
         if (_currentSession is not null)
         {
@@ -569,6 +593,55 @@ public sealed class MadiController
         await RefreshAuthenticationAsync(cancellationToken);
 
         yield return new AppMessage($"모델을 선택했습니다: {model.QualifiedName}");
+        yield return new AppStateChanged(CreateState());
+        yield return new AppNavigationChanged(
+            await CreateNavigationSnapshotAsync(cancellationToken));
+        yield return new AppTurnCompleted(true);
+    }
+
+    private async IAsyncEnumerable<AppEvent> SetReasoningEffortAsync(
+        ReasoningEffort? effort,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var model = FindSelectedAvailableModel();
+        if (model is null || !model.SupportsReasoning)
+        {
+            yield return new AppMessage(
+                "선택한 모델은 추론 수준 설정을 지원하지 않습니다.",
+                AppMessageKind.Error);
+            yield return new AppStateChanged(CreateState());
+            yield return new AppTurnCompleted(false);
+            yield break;
+        }
+
+        if (effort is not null
+            && effort is not ReasoningEffort.Low
+            and not ReasoningEffort.Medium
+            and not ReasoningEffort.High)
+        {
+            yield return new AppMessage(
+                "지원하지 않는 추론 수준입니다.",
+                AppMessageKind.Error);
+            yield return new AppStateChanged(CreateState());
+            yield return new AppTurnCompleted(false);
+            yield break;
+        }
+
+        if (_selectedModel.ReasoningEffort == effort)
+        {
+            yield return new AppStateChanged(CreateState());
+            yield return new AppTurnCompleted(true);
+            yield break;
+        }
+
+        _selectedModel = _selectedModel with { ReasoningEffort = effort };
+        if (_currentSession is not null)
+        {
+            _currentSession.Model = _selectedModel;
+            _currentSession.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            await _store.SaveSessionAsync(_currentSession, cancellationToken);
+        }
+
         yield return new AppStateChanged(CreateState());
         yield return new AppNavigationChanged(
             await CreateNavigationSnapshotAsync(cancellationToken));
@@ -1212,7 +1285,7 @@ public sealed class MadiController
         var options = session.Model;
         if (!string.IsNullOrWhiteSpace(options.Provider))
         {
-            return _authentication.ResolveModel(options);
+            return NormalizeReasoningEffort(_authentication.ResolveModel(options));
         }
 
         var matches = _availableModels
@@ -1223,7 +1296,7 @@ public sealed class MadiController
             .ToArray();
         if (matches.Length <= 1)
         {
-            return _authentication.ResolveModel(options);
+            return NormalizeReasoningEffort(_authentication.ResolveModel(options));
         }
 
         var historicalProviderIds = session.Conversation
@@ -1242,7 +1315,37 @@ public sealed class MadiController
             _selectedModel.Provider,
             StringComparison.OrdinalIgnoreCase));
         inferred ??= matches[0];
-        return _authentication.ResolveModel(options with { Provider = inferred.Provider });
+        return NormalizeReasoningEffort(
+            _authentication.ResolveModel(options with { Provider = inferred.Provider }));
+    }
+
+    private ModelOptions NormalizeReasoningEffort(
+        ModelOptions options,
+        bool useMediumDefault = false)
+    {
+        if (options.ReasoningEffort is ReasoningEffort.Low
+            or ReasoningEffort.Medium
+            or ReasoningEffort.High)
+        {
+            return options;
+        }
+        if (options.ReasoningEffort is null && !useMediumDefault)
+        {
+            return options;
+        }
+
+        var model = _availableModels.FirstOrDefault(item =>
+            string.Equals(item.Name, options.Model, StringComparison.OrdinalIgnoreCase)
+            && (options.Provider is null || string.Equals(
+                item.Provider,
+                options.Provider,
+                StringComparison.OrdinalIgnoreCase)));
+        return options with
+        {
+            ReasoningEffort = model?.SupportsReasoning == true
+                ? ReasoningEffort.Medium
+                : null,
+        };
     }
 
     private AvailableModel? FindSelectedAvailableModel() =>

@@ -13,6 +13,7 @@ namespace Madi.GUI;
 
 public sealed partial class MainPage : Page
 {
+    private const double TimelineBottomTolerance = 1;
     private readonly GuiSettingsStore _settings = new();
     private readonly ObservableCollection<string> _recentWorkspaces = [];
     private MainViewModel? _viewModel;
@@ -20,16 +21,32 @@ public sealed partial class MainPage : Page
     private Control? _systemPromptPreviousFocus;
     private bool _isTimelineScrollPending;
     private bool _isAutoScrollingTimeline;
+    private bool _timelineScrollRequestedWhilePending;
+    private bool _isTimelinePointerInteraction;
+    private int _timelineScrollGeneration;
 
     public MainPage()
     {
         InitializeComponent();
+        TimelineScroller.AddHandler(
+            PointerPressedEvent,
+            new PointerEventHandler(OnTimelinePointerPressed),
+            handledEventsToo: true);
+        TimelineScroller.AddHandler(
+            PointerReleasedEvent,
+            new PointerEventHandler(OnTimelinePointerReleased),
+            handledEventsToo: true);
+        TimelineScroller.AddHandler(
+            PointerCanceledEvent,
+            new PointerEventHandler(OnTimelinePointerReleased),
+            handledEventsToo: true);
         RecentWorkspaceList.ItemsSource = _recentWorkspaces;
         Loaded += OnLoaded;
     }
 
     public void CancelAndDispose()
     {
+        CancelTimelineScrollOperations();
         _workspaceCancellation?.Cancel();
         _workspaceCancellation?.Dispose();
         _workspaceCancellation = null;
@@ -117,6 +134,7 @@ public sealed partial class MainPage : Page
             _workspaceCancellation?.Cancel();
             _workspaceCancellation?.Dispose();
             _workspaceCancellation = new CancellationTokenSource();
+            CancelTimelineScrollOperations();
             _viewModel?.Dispose();
             _viewModel = new MainViewModel(
                 host.Controller,
@@ -135,7 +153,7 @@ public sealed partial class MainPage : Page
             {
                 if (ReferenceEquals(_viewModel, openedViewModel))
                 {
-                    openedViewModel.FollowLatest = true;
+                    SetTimelineFollowLatest(true);
                     ScrollTimelineToEnd();
                 }
             });
@@ -184,6 +202,7 @@ public sealed partial class MainPage : Page
     {
         if (_viewModel?.FollowLatest == true)
         {
+            SetTimelineFollowLatest(true);
             ScrollTimelineToEnd();
         }
     }
@@ -196,12 +215,32 @@ public sealed partial class MainPage : Page
         }
 
         var atBottom = IsTimelineAtBottom();
-        if (!_isAutoScrollingTimeline)
+        if (atBottom)
         {
-            _viewModel.FollowLatest = atBottom;
+            SetTimelineFollowLatest(true);
         }
+        else if (!_isAutoScrollingTimeline || _isTimelinePointerInteraction)
+        {
+            StopFollowingTimeline();
+        }
+
         LatestButton.Visibility = atBottom ? Visibility.Collapsed : Visibility.Visible;
     }
+
+    private void OnTimelinePointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        var wheelDelta = e.GetCurrentPoint(TimelineScroller).Properties.MouseWheelDelta;
+        if (wheelDelta > 0 || !IsTimelineAtBottom())
+        {
+            StopFollowingTimeline();
+        }
+    }
+
+    private void OnTimelinePointerPressed(object sender, PointerRoutedEventArgs e) =>
+        _isTimelinePointerInteraction = true;
+
+    private void OnTimelinePointerReleased(object sender, PointerRoutedEventArgs e) =>
+        _isTimelinePointerInteraction = false;
 
     private void OnGoLatest(object sender, RoutedEventArgs e)
     {
@@ -210,38 +249,64 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        _viewModel.FollowLatest = true;
+        SetTimelineFollowLatest(true);
         ScrollTimelineToEnd();
         LatestButton.Visibility = Visibility.Collapsed;
+    }
+
+    private void SetTimelineFollowLatest(bool followLatest)
+    {
+        if (_viewModel is not null)
+        {
+            _viewModel.FollowLatest = followLatest;
+        }
+        TimelineScroller.VerticalAnchorRatio = followLatest ? 1 : 0;
+    }
+
+    private void StopFollowingTimeline()
+    {
+        SetTimelineFollowLatest(false);
+        CancelTimelineScrollOperations();
+    }
+
+    private void CancelTimelineScrollOperations()
+    {
+        _timelineScrollGeneration++;
+        _isTimelineScrollPending = false;
+        _isAutoScrollingTimeline = false;
+        _timelineScrollRequestedWhilePending = false;
+        _isTimelinePointerInteraction = false;
     }
 
     private void ScrollTimelineToEnd()
     {
         if (_isTimelineScrollPending)
         {
+            _timelineScrollRequestedWhilePending = true;
             return;
         }
 
         _isTimelineScrollPending = true;
         _isAutoScrollingTimeline = true;
+        _timelineScrollRequestedWhilePending = false;
+        var generation = ++_timelineScrollGeneration;
         if (!DispatcherQueue.TryEnqueue(
                 Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
-                () => ApplyTimelineScrollToEnd(verifyAfterLayout: true)))
+                () => ApplyTimelineScrollToEnd(generation, attemptsRemaining: 8)))
         {
-            _isTimelineScrollPending = false;
-            _isAutoScrollingTimeline = false;
+            CompleteTimelineScrollToEnd(generation);
         }
     }
 
-    private void ApplyTimelineScrollToEnd(bool verifyAfterLayout)
+    private void ApplyTimelineScrollToEnd(int generation, int attemptsRemaining)
     {
-        if (_viewModel?.FollowLatest != true)
+        if (!IsCurrentTimelineScroll(generation) || _viewModel?.FollowLatest != true)
         {
-            _isTimelineScrollPending = false;
-            _isAutoScrollingTimeline = false;
+            CompleteTimelineScrollToEnd(generation);
             return;
         }
 
+        _timelineScrollRequestedWhilePending = false;
         TimelineScroller.UpdateLayout();
         TimelineScroller.ChangeView(
             horizontalOffset: null,
@@ -249,36 +314,61 @@ public sealed partial class MainPage : Page
             zoomFactor: null,
             disableAnimation: true);
 
-        // Markdown rendering changes the item height after its Text binding has updated.
-        // Run once more on the next layout pass so ChangeView does not use a stale extent.
-        if (verifyAfterLayout && DispatcherQueue.TryEnqueue(
+        if (!DispatcherQueue.TryEnqueue(
                 Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
-                () => ApplyTimelineScrollToEnd(verifyAfterLayout: false)))
+                () => VerifyTimelineScrollToEnd(generation, attemptsRemaining)))
         {
-            return;
+            CompleteTimelineScrollToEnd(generation);
         }
-
-        if (DispatcherQueue.TryEnqueue(
-                Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
-                CompleteTimelineScrollToEnd))
-        {
-            return;
-        }
-
-        CompleteTimelineScrollToEnd();
     }
 
-    private void CompleteTimelineScrollToEnd()
+    private void VerifyTimelineScrollToEnd(int generation, int attemptsRemaining)
     {
+        if (!IsCurrentTimelineScroll(generation) || _viewModel?.FollowLatest != true)
+        {
+            CompleteTimelineScrollToEnd(generation);
+            return;
+        }
+
+        TimelineScroller.UpdateLayout();
+        var requestedAgain = _timelineScrollRequestedWhilePending;
+        if ((requestedAgain || !IsTimelineAtBottom()) && attemptsRemaining > 1)
+        {
+            var nextAttempts = attemptsRemaining - 1;
+            if (DispatcherQueue.TryEnqueue(
+                    Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                    () => ApplyTimelineScrollToEnd(generation, nextAttempts)))
+            {
+                return;
+            }
+        }
+
+        CompleteTimelineScrollToEnd(generation);
+    }
+
+    private bool IsCurrentTimelineScroll(int generation) =>
+        _isTimelineScrollPending && generation == _timelineScrollGeneration;
+
+    private void CompleteTimelineScrollToEnd(int generation)
+    {
+        if (generation != _timelineScrollGeneration)
+        {
+            return;
+        }
+
         _isTimelineScrollPending = false;
         _isAutoScrollingTimeline = false;
-        LatestButton.Visibility = IsTimelineAtBottom()
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+        _timelineScrollRequestedWhilePending = false;
+        var atBottom = IsTimelineAtBottom();
+        if (atBottom)
+        {
+            SetTimelineFollowLatest(true);
+        }
+        LatestButton.Visibility = atBottom ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private bool IsTimelineAtBottom() =>
-        TimelineScroller.ScrollableHeight - TimelineScroller.VerticalOffset < 24;
+        TimelineScroller.ScrollableHeight - TimelineScroller.VerticalOffset < TimelineBottomTolerance;
 
     private void OnCopyAssistantMarkdown(object sender, RoutedEventArgs e)
     {
@@ -332,11 +422,20 @@ public sealed partial class MainPage : Page
         }
 
         targetOffset = Math.Clamp(targetOffset, 0, TimelineScroller.ScrollableHeight);
+        if (TimelineScroller.ScrollableHeight - targetOffset < TimelineBottomTolerance)
+        {
+            SetTimelineFollowLatest(true);
+        }
+        else
+        {
+            StopFollowingTimeline();
+        }
+
         TimelineScroller.ChangeView(
             horizontalOffset: null,
             verticalOffset: targetOffset,
             zoomFactor: null,
-            disableAnimation: false);
+            disableAnimation: true);
         e.Handled = true;
     }
 
@@ -556,6 +655,17 @@ public sealed partial class MainPage : Page
         if (_viewModel is not null && ModelSelector.SelectedValue is string model)
         {
             await _viewModel.SelectModelAsync(model);
+        }
+    }
+
+    private async void OnReasoningEffortSelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_viewModel is not null
+            && ReasoningEffortSelector.SelectedValue is string effort)
+        {
+            await _viewModel.SetReasoningEffortAsync(effort);
         }
     }
 

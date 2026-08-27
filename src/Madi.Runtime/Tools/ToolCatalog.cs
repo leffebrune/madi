@@ -19,8 +19,10 @@ public sealed class ToolCatalog
         Read = new ReadTool(WorkingDirectory);
         Write = new WriteTool(WorkingDirectory);
         Bash = new BashTool(WorkingDirectory, shellPath, utilityBinDirectory);
+        Grep = new GrepTool(WorkingDirectory, utilityBinDirectory);
+        Find = new FindTool(WorkingDirectory, utilityBinDirectory);
         Edit = new EditTool(WorkingDirectory);
-        All = [Read, Write, Bash, Edit];
+        All = [Read, Write, Bash, Grep, Find, Edit];
         _tools = All.ToDictionary(static tool => tool.Name, StringComparer.Ordinal);
     }
 
@@ -28,6 +30,8 @@ public sealed class ToolCatalog
     public ReadTool Read { get; }
     public WriteTool Write { get; }
     public BashTool Bash { get; }
+    public GrepTool Grep { get; }
+    public FindTool Find { get; }
     public EditTool Edit { get; }
     public IReadOnlyList<ITool> All { get; }
 
@@ -46,6 +50,16 @@ public sealed class ToolCatalog
     public Task<string> BashAsync(string command, double? timeout = null,
         CancellationToken cancellationToken = default) =>
         Bash.ExecuteAsync(command, timeout, cancellationToken);
+
+    public Task<string> GrepAsync(string pattern, string? path = null, string? glob = null,
+        bool? caseSensitive = null, bool literal = false, bool hidden = false,
+        CancellationToken cancellationToken = default) =>
+        Grep.ExecuteAsync(pattern, path, glob, caseSensitive, literal, hidden, cancellationToken);
+
+    public Task<string> FindAsync(string pattern, string? path = null, string? type = null,
+        string? extension = null, bool? caseSensitive = null, bool literal = false, bool hidden = false,
+        CancellationToken cancellationToken = default) =>
+        Find.ExecuteAsync(pattern, path, type, extension, caseSensitive, literal, hidden, cancellationToken);
 
     public Task<string> EditAsync(string path, IReadOnlyList<TextEdit> edits,
         CancellationToken cancellationToken = default) =>
