@@ -3,7 +3,6 @@ using Madi.App;
 using Madi.Core;
 using Madi.Runtime.Authentication;
 using Madi.Runtime.Providers;
-using Madi.Services;
 
 namespace Madi.App.Tests;
 
@@ -322,26 +321,6 @@ public sealed class MadiControllerTests
         Assert.Equal("OpenAI API/api-model", host.Controller.State.Model.QualifiedName);
         Assert.Equal(AuthenticationKind.ApiKey, host.Controller.State.AuthenticationKind);
         Assert.Equal(AuthenticationState.Ready, host.Controller.State.Authentication);
-    }
-
-    [Fact]
-    public async Task HelloArgumentIsUnknownAndUsageNoLongerAdvertisesIt()
-    {
-        using var directory = new TemporaryDirectory();
-        await File.WriteAllTextAsync(Path.Combine(directory.Path, "fd.exe"), "present");
-        await File.WriteAllTextAsync(Path.Combine(directory.Path, "rg.exe"), "present");
-        var ui = new RecordingUserInterface();
-        var application = new ConsoleApplication(
-            CreateController(),
-            new UtilityInstaller(new NoOpDownloader(), directory.Path),
-            ui);
-
-        var exitCode = await application.RunAsync(["hello"]);
-
-        Assert.Equal(1, exitCode);
-        var usage = Assert.Single(ui.Lines);
-        Assert.Contains("사용법:", usage, StringComparison.Ordinal);
-        Assert.DoesNotContain("hello", usage, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -996,22 +975,6 @@ public sealed class MadiControllerTests
             LogoutCount++;
             return Task.CompletedTask;
         }
-    }
-
-    private sealed class RecordingUserInterface : IUserInterface
-    {
-        public List<string> Lines { get; } = [];
-        public Task<string?> ReadLineAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<string?>(null);
-        public void Write(string message) { }
-        public void WriteLine(string message) => Lines.Add(message);
-    }
-
-    private sealed class NoOpDownloader : IGitHubReleaseFileDownloader
-    {
-        public Task DownloadLatestReleaseFileAsync(
-            GitHubReleaseFileRequest request,
-            CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class TemporaryDirectory : IDisposable

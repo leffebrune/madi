@@ -26,7 +26,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private bool _isBusy;
     private bool _isSignedIn;
     private bool _supportsOAuth;
-    private bool _followLatest = true;
     private string? _submittedDraft;
     private TimelineItemViewModel? _pendingUserTimelineItem;
 
@@ -54,7 +53,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         ReasoningEfforts.Add(new ReasoningEffortItemViewModel("high", "높음", ReasoningEffort.High));
     }
 
-    public event EventHandler? TimelineChanged;
     public event EventHandler? ExitRequested;
 
     public ObservableCollection<TimelineItemViewModel> Timeline { get; } = [];
@@ -211,12 +209,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         get => _isSignedIn;
         private set => SetProperty(ref _isSignedIn, value);
-    }
-
-    public bool FollowLatest
-    {
-        get => _followLatest;
-        set => SetProperty(ref _followLatest, value);
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -377,18 +369,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 ApplyNavigation(navigation.Navigation);
                 break;
             case AppConversationLoaded conversation:
-                FollowLatest = true;
                 _pendingUserTimelineItem = null;
                 ApplyConversation(conversation.Conversation);
                 break;
             case AppConversationCleared:
-                FollowLatest = true;
                 _pendingUserTimelineItem = null;
                 Timeline.Clear();
                 UsageText = "사용량 정보 없음";
                 break;
             case AppUserInput user:
-                FollowLatest = true;
                 _pendingUserTimelineItem = new TimelineItemViewModel(
                     TimelineItemKind.User,
                     user.Text,
@@ -519,7 +508,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 break;
         }
 
-        TimelineChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void ApplyState(AppState state)
@@ -631,7 +619,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             Timeline[^1].SetConversationInteraction(CanInteract);
         }
         HeaderTitle = conversation.Session.Title;
-        TimelineChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private string? GetActivityDescription(ConversationEntrySnapshot entry) => entry.Kind switch

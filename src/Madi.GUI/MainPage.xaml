@@ -48,7 +48,6 @@
 
         <DataTemplate x:Key="TimelineTemplate" x:DataType="presentation:TimelineItemViewModel">
             <Border Width="1200"
-                    CanBeScrollAnchor="True"
                     Margin="12,5"
                     Padding="14,10"
                     CornerRadius="10"
@@ -336,18 +335,10 @@
                 </StackPanel>
 
                 <Grid Grid.Row="2">
-                    <ScrollViewer x:Name="TimelineScroller"
-                                  VerticalAnchorRatio="0"
-                                  IsTabStop="True"
-                                  AllowFocusOnInteraction="True"
-                                  UseSystemFocusVisuals="False"
-                                  HorizontalScrollMode="Disabled"
+                    <ScrollViewer HorizontalScrollMode="Disabled"
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollMode="Enabled"
                                   VerticalScrollBarVisibility="Auto"
-                                  PreviewKeyDown="OnTimelinePreviewKeyDown"
-                                  PointerWheelChanged="OnTimelinePointerWheelChanged"
-                                  ViewChanged="OnTimelineViewChanged"
                                   AutomationProperties.Name="대화 타임라인">
                         <ItemsRepeater ItemsSource="{Binding Timeline}"
                                        ItemTemplate="{StaticResource TimelineTemplate}">
@@ -356,13 +347,6 @@
                             </ItemsRepeater.Layout>
                         </ItemsRepeater>
                     </ScrollViewer>
-                    <Button x:Name="LatestButton"
-                            Content="최신으로 이동"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Bottom"
-                            Margin="0,0,0,12"
-                            Click="OnGoLatest"
-                            Visibility="Collapsed" />
                 </Grid>
 
                 <Grid Grid.Row="3" Padding="16,8,16,14">
