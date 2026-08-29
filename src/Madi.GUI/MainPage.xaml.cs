@@ -13,46 +13,30 @@ namespace Madi.GUI;
 
 public sealed partial class MainPage : Page
 {
-    private const double TimelineBottomTolerance = 1;
     private readonly GuiSettingsStore _settings = new();
     private readonly ObservableCollection<string> _recentWorkspaces = [];
     private MainViewModel? _viewModel;
     private CancellationTokenSource? _workspaceCancellation;
     private Control? _systemPromptPreviousFocus;
-    private bool _isTimelineScrollPending;
-    private bool _isAutoScrollingTimeline;
-    private bool _timelineScrollRequestedWhilePending;
-    private bool _isTimelinePointerInteraction;
-    private int _timelineScrollGeneration;
 
     public MainPage()
     {
         InitializeComponent();
-        TimelineScroller.AddHandler(
-            PointerPressedEvent,
-            new PointerEventHandler(OnTimelinePointerPressed),
-            handledEventsToo: true);
-        TimelineScroller.AddHandler(
-            PointerReleasedEvent,
-            new PointerEventHandler(OnTimelinePointerReleased),
-            handledEventsToo: true);
-        TimelineScroller.AddHandler(
-            PointerCanceledEvent,
-            new PointerEventHandler(OnTimelinePointerReleased),
-            handledEventsToo: true);
         RecentWorkspaceList.ItemsSource = _recentWorkspaces;
         Loaded += OnLoaded;
     }
 
     public void CancelAndDispose()
     {
-        CancelTimelineScrollOperations();
         _workspaceCancellation?.Cancel();
         _workspaceCancellation?.Dispose();
         _workspaceCancellation = null;
-        _viewModel?.Cancel();
-        _viewModel?.Dispose();
-        _viewModel = null;
+        if (_viewModel is not null)
+        {
+            _viewModel.Cancel();
+            _viewModel.Dispose();
+            _viewModel = null;
+        }
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -134,12 +118,13 @@ public sealed partial class MainPage : Page
             _workspaceCancellation?.Cancel();
             _workspaceCancellation?.Dispose();
             _workspaceCancellation = new CancellationTokenSource();
-            CancelTimelineScrollOperations();
-            _viewModel?.Dispose();
+            if (_viewModel is not null)
+            {
+                _viewModel.Dispose();
+            }
             _viewModel = new MainViewModel(
                 host.Controller,
                 new DispatcherQueueAdapter(DispatcherQueue));
-            _viewModel.TimelineChanged += OnTimelineChanged;
             _viewModel.ExitRequested += OnExitRequested;
             DataContext = _viewModel;
             await _viewModel.InitializeAsync(_workspaceCancellation.Token);
@@ -148,15 +133,6 @@ public sealed partial class MainPage : Page
             Shell.Visibility = Visibility.Visible;
             LegacyInfoBar.IsOpen = _viewModel.LegacyItemCount > 0;
             PromptBox.Focus(FocusState.Programmatic);
-            var openedViewModel = _viewModel;
-            DispatcherQueue.TryEnqueue(() =>
-            {
-                if (ReferenceEquals(_viewModel, openedViewModel))
-                {
-                    SetTimelineFollowLatest(true);
-                    ScrollTimelineToEnd();
-                }
-            });
             _ = RunUtilityInstallerAsync(
                 host.UtilityInstaller,
                 _viewModel,
@@ -197,178 +173,6 @@ public sealed partial class MainPage : Page
                 AppMessageKind.Warning));
         }
     }
-
-    private void OnTimelineChanged(object? sender, EventArgs e)
-    {
-        if (_viewModel?.FollowLatest == true)
-        {
-            SetTimelineFollowLatest(true);
-            ScrollTimelineToEnd();
-        }
-    }
-
-    private void OnTimelineViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
-    {
-        if (_viewModel is null)
-        {
-            return;
-        }
-
-        var atBottom = IsTimelineAtBottom();
-        if (atBottom)
-        {
-            SetTimelineFollowLatest(true);
-        }
-        else if (!_isAutoScrollingTimeline || _isTimelinePointerInteraction)
-        {
-            StopFollowingTimeline();
-        }
-
-        LatestButton.Visibility = atBottom ? Visibility.Collapsed : Visibility.Visible;
-    }
-
-    private void OnTimelinePointerWheelChanged(object sender, PointerRoutedEventArgs e)
-    {
-        var wheelDelta = e.GetCurrentPoint(TimelineScroller).Properties.MouseWheelDelta;
-        if (wheelDelta > 0 || !IsTimelineAtBottom())
-        {
-            StopFollowingTimeline();
-        }
-    }
-
-    private void OnTimelinePointerPressed(object sender, PointerRoutedEventArgs e) =>
-        _isTimelinePointerInteraction = true;
-
-    private void OnTimelinePointerReleased(object sender, PointerRoutedEventArgs e) =>
-        _isTimelinePointerInteraction = false;
-
-    private void OnGoLatest(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel is null)
-        {
-            return;
-        }
-
-        SetTimelineFollowLatest(true);
-        ScrollTimelineToEnd();
-        LatestButton.Visibility = Visibility.Collapsed;
-    }
-
-    private void SetTimelineFollowLatest(bool followLatest)
-    {
-        if (_viewModel is not null)
-        {
-            _viewModel.FollowLatest = followLatest;
-        }
-        TimelineScroller.VerticalAnchorRatio = followLatest ? 1 : 0;
-    }
-
-    private void StopFollowingTimeline()
-    {
-        SetTimelineFollowLatest(false);
-        CancelTimelineScrollOperations();
-    }
-
-    private void CancelTimelineScrollOperations()
-    {
-        _timelineScrollGeneration++;
-        _isTimelineScrollPending = false;
-        _isAutoScrollingTimeline = false;
-        _timelineScrollRequestedWhilePending = false;
-        _isTimelinePointerInteraction = false;
-    }
-
-    private void ScrollTimelineToEnd()
-    {
-        if (_isTimelineScrollPending)
-        {
-            _timelineScrollRequestedWhilePending = true;
-            return;
-        }
-
-        _isTimelineScrollPending = true;
-        _isAutoScrollingTimeline = true;
-        _timelineScrollRequestedWhilePending = false;
-        var generation = ++_timelineScrollGeneration;
-        if (!DispatcherQueue.TryEnqueue(
-                Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
-                () => ApplyTimelineScrollToEnd(generation, attemptsRemaining: 8)))
-        {
-            CompleteTimelineScrollToEnd(generation);
-        }
-    }
-
-    private void ApplyTimelineScrollToEnd(int generation, int attemptsRemaining)
-    {
-        if (!IsCurrentTimelineScroll(generation) || _viewModel?.FollowLatest != true)
-        {
-            CompleteTimelineScrollToEnd(generation);
-            return;
-        }
-
-        _timelineScrollRequestedWhilePending = false;
-        TimelineScroller.UpdateLayout();
-        TimelineScroller.ChangeView(
-            horizontalOffset: null,
-            verticalOffset: TimelineScroller.ScrollableHeight,
-            zoomFactor: null,
-            disableAnimation: true);
-
-        if (!DispatcherQueue.TryEnqueue(
-                Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
-                () => VerifyTimelineScrollToEnd(generation, attemptsRemaining)))
-        {
-            CompleteTimelineScrollToEnd(generation);
-        }
-    }
-
-    private void VerifyTimelineScrollToEnd(int generation, int attemptsRemaining)
-    {
-        if (!IsCurrentTimelineScroll(generation) || _viewModel?.FollowLatest != true)
-        {
-            CompleteTimelineScrollToEnd(generation);
-            return;
-        }
-
-        TimelineScroller.UpdateLayout();
-        var requestedAgain = _timelineScrollRequestedWhilePending;
-        if ((requestedAgain || !IsTimelineAtBottom()) && attemptsRemaining > 1)
-        {
-            var nextAttempts = attemptsRemaining - 1;
-            if (DispatcherQueue.TryEnqueue(
-                    Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
-                    () => ApplyTimelineScrollToEnd(generation, nextAttempts)))
-            {
-                return;
-            }
-        }
-
-        CompleteTimelineScrollToEnd(generation);
-    }
-
-    private bool IsCurrentTimelineScroll(int generation) =>
-        _isTimelineScrollPending && generation == _timelineScrollGeneration;
-
-    private void CompleteTimelineScrollToEnd(int generation)
-    {
-        if (generation != _timelineScrollGeneration)
-        {
-            return;
-        }
-
-        _isTimelineScrollPending = false;
-        _isAutoScrollingTimeline = false;
-        _timelineScrollRequestedWhilePending = false;
-        var atBottom = IsTimelineAtBottom();
-        if (atBottom)
-        {
-            SetTimelineFollowLatest(true);
-        }
-        LatestButton.Visibility = atBottom ? Visibility.Collapsed : Visibility.Visible;
-    }
-
-    private bool IsTimelineAtBottom() =>
-        TimelineScroller.ScrollableHeight - TimelineScroller.VerticalOffset < TimelineBottomTolerance;
 
     private void OnConversationItemMenuClick(object sender, RoutedEventArgs e)
     {
@@ -461,45 +265,6 @@ public sealed partial class MainPage : Page
         {
             activity.IsActivityExpanded = !activity.IsActivityExpanded;
         }
-    }
-
-    private void OnTimelinePreviewKeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        const double lineScrollAmount = 48;
-        var pageScrollAmount = Math.Max(
-            lineScrollAmount,
-            TimelineScroller.ViewportHeight - lineScrollAmount);
-        var targetOffset = e.Key switch
-        {
-            VirtualKey.Up => TimelineScroller.VerticalOffset - lineScrollAmount,
-            VirtualKey.Down => TimelineScroller.VerticalOffset + lineScrollAmount,
-            VirtualKey.PageUp => TimelineScroller.VerticalOffset - pageScrollAmount,
-            VirtualKey.PageDown => TimelineScroller.VerticalOffset + pageScrollAmount,
-            VirtualKey.Home => 0,
-            VirtualKey.End => TimelineScroller.ScrollableHeight,
-            _ => double.NaN,
-        };
-        if (double.IsNaN(targetOffset))
-        {
-            return;
-        }
-
-        targetOffset = Math.Clamp(targetOffset, 0, TimelineScroller.ScrollableHeight);
-        if (TimelineScroller.ScrollableHeight - targetOffset < TimelineBottomTolerance)
-        {
-            SetTimelineFollowLatest(true);
-        }
-        else
-        {
-            StopFollowingTimeline();
-        }
-
-        TimelineScroller.ChangeView(
-            horizontalOffset: null,
-            verticalOffset: targetOffset,
-            zoomFactor: null,
-            disableAnimation: true);
-        e.Handled = true;
     }
 
     private async void OnNavigationItemClick(object sender, ItemClickEventArgs e)

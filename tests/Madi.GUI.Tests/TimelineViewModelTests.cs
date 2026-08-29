@@ -160,28 +160,6 @@ public sealed class TimelineViewModelTests
     }
 
     [Fact]
-    public async Task StreamingDoesNotReenableFollowLatestAfterUserScrollsAway()
-    {
-        var viewModel = CreateViewModel();
-        viewModel.FollowLatest = false;
-
-        await viewModel.ApplyExternalEventAsync(new AppAssistantDelta("답변"));
-
-        Assert.False(viewModel.FollowLatest);
-    }
-
-    [Fact]
-    public async Task NewUserInputReenablesFollowLatest()
-    {
-        var viewModel = CreateViewModel();
-        viewModel.FollowLatest = false;
-
-        await viewModel.ApplyExternalEventAsync(new AppUserInput("새 질문"));
-
-        Assert.True(viewModel.FollowLatest);
-    }
-
-    [Fact]
     public async Task WorkPromptDraftSurvivesUnrelatedBusyStateChanges()
     {
         var viewModel = CreateViewModel();
