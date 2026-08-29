@@ -72,6 +72,8 @@ public sealed class TimelineItemViewModel : ObservableObject
     private bool _isActivityExpanded;
     private TimeSpan? _toolDuration;
     private TimeSpan? _apiDuration;
+    private bool _canInteractWithConversation;
+    private bool _isPersistedConversationItem;
 
     public TimelineItemViewModel(
         TimelineItemKind kind,
@@ -80,19 +82,27 @@ public sealed class TimelineItemViewModel : ObservableObject
         string? activityId = null,
         bool isRunning = false,
         bool isError = false,
-        string? description = null)
+        string? description = null,
+        string? sessionId = null,
+        int? conversationIndex = null,
+        bool isPersistedConversationItem = false)
     {
         Kind = kind;
         _text = text;
         _details = details;
         _description = description ?? string.Empty;
         ActivityId = activityId;
+        SessionId = sessionId;
+        ConversationIndex = conversationIndex;
+        _isPersistedConversationItem = isPersistedConversationItem;
         _isRunning = isRunning;
         _isError = isError;
     }
 
     public TimelineItemKind Kind { get; }
     public string? ActivityId { get; }
+    public string? SessionId { get; }
+    public int? ConversationIndex { get; }
     public ObservableCollection<CompactToolActivityViewModel> ChildTools { get; } = [];
     public bool HasChildTools => ChildTools.Count > 0;
     public string RoleLabel => Kind switch
@@ -106,7 +116,13 @@ public sealed class TimelineItemViewModel : ObservableObject
         _ => "정보",
     };
     public bool HasDetails => !string.IsNullOrWhiteSpace(Details);
+    public bool IsUser => Kind == TimelineItemKind.User;
     public bool IsAssistant => Kind == TimelineItemKind.Assistant;
+    public bool CanDeleteFromHere => IsUser
+        && SessionId is not null
+        && ConversationIndex is not null
+        && _isPersistedConversationItem
+        && _canInteractWithConversation;
     public bool IsActivity => Kind is TimelineItemKind.Tool or TimelineItemKind.Subagent;
     public bool ShowsRoleLabel => Kind is TimelineItemKind.Information
         or TimelineItemKind.Warning
@@ -208,6 +224,28 @@ public sealed class TimelineItemViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(HasTiming));
         OnPropertyChanged(nameof(TimingText));
+    }
+
+    public void SetConversationInteraction(bool canInteract)
+    {
+        if (_canInteractWithConversation == canInteract)
+        {
+            return;
+        }
+
+        _canInteractWithConversation = canInteract;
+        OnPropertyChanged(nameof(CanDeleteFromHere));
+    }
+
+    public void MarkConversationItemPersisted()
+    {
+        if (_isPersistedConversationItem)
+        {
+            return;
+        }
+
+        _isPersistedConversationItem = true;
+        OnPropertyChanged(nameof(CanDeleteFromHere));
     }
 
     public void AddChildTool(CompactToolActivityViewModel tool)

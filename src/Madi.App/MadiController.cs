@@ -303,6 +303,10 @@ public sealed class MadiController
             DeleteSessionAction delete => DeleteSessionAsync(
                 delete.SessionId,
                 cancellationToken),
+            DeleteConversationFromAction delete => DeleteConversationFromAsync(
+                delete.SessionId,
+                delete.ConversationIndex,
+                cancellationToken),
             DeleteWorkAction delete => DeleteWorkAsync(
                 delete.WorkId,
                 cancellationToken),
@@ -350,7 +354,7 @@ public sealed class MadiController
         var toolArguments = new Dictionary<string, string>(StringComparer.Ordinal);
         var subagentPrompts = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        yield return new AppUserInput(prompt);
+        yield return new AppUserInput(prompt, session.Id, conversationStart);
         try
         {
             await foreach (var item in _agent.RespondAsync(
@@ -833,6 +837,76 @@ public sealed class MadiController
         yield return new AppConversationLoaded(
             ConversationSnapshotFactory.Create(conversation.Session));
         yield return new AppStateChanged(CreateState());
+        yield return new AppTurnCompleted(true);
+    }
+
+    private async IAsyncEnumerable<AppEvent> DeleteConversationFromAsync(
+        string sessionId,
+        int conversationIndex,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (_currentSession is null
+            || !string.Equals(_currentSession.Id, sessionId, StringComparison.Ordinal))
+        {
+            yield return new AppMessage(
+                "현재 대화에서 삭제할 메시지를 찾을 수 없습니다.",
+                AppMessageKind.Error);
+            yield return new AppTurnCompleted(false);
+            yield break;
+        }
+
+        var session = _currentSession;
+        if (conversationIndex < 0
+            || conversationIndex >= session.Conversation.Count
+            || session.Conversation[conversationIndex] is not UserMessage)
+        {
+            yield return new AppMessage(
+                "삭제 시작점은 현재 대화의 사용자 메시지여야 합니다.",
+                AppMessageKind.Error);
+            yield return new AppTurnCompleted(false);
+            yield break;
+        }
+
+        var originalConversation = session.Conversation.ToArray();
+        var originalTitle = session.Title;
+        var originalUpdatedAtUtc = session.UpdatedAtUtc;
+        session.Conversation.RemoveRange(
+            conversationIndex,
+            session.Conversation.Count - conversationIndex);
+        if (session.Conversation.Count == 0)
+        {
+            session.Title = "새 대화";
+        }
+        session.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        try
+        {
+            await _store.RewriteConversationAsync(session, cancellationToken);
+            await _store.SaveSessionAsync(session, cancellationToken);
+        }
+        catch
+        {
+            session.Conversation.Clear();
+            session.Conversation.AddRange(originalConversation);
+            session.Title = originalTitle;
+            session.UpdatedAtUtc = originalUpdatedAtUtc;
+            try
+            {
+                await _store.RewriteConversationAsync(session, CancellationToken.None);
+                await _store.SaveSessionAsync(session, CancellationToken.None);
+            }
+            catch
+            {
+                // Preserve the original failure; recovery is best effort.
+            }
+            throw;
+        }
+
+        yield return new AppConversationLoaded(
+            ConversationSnapshotFactory.Create(session));
+        yield return new AppStateChanged(CreateState());
+        yield return new AppNavigationChanged(
+            await CreateNavigationSnapshotAsync(cancellationToken));
         yield return new AppTurnCompleted(true);
     }
 

@@ -14,7 +14,10 @@ public enum AppMessageKind
 public sealed record AppMessage(string Text, AppMessageKind Kind = AppMessageKind.Information)
     : AppEvent;
 
-public sealed record AppUserInput(string Text) : AppEvent;
+public sealed record AppUserInput(
+    string Text,
+    string? SessionId = null,
+    int? ConversationIndex = null) : AppEvent;
 
 public sealed record AppAssistantDelta(string Text) : AppEvent;
 

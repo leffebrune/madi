@@ -38,7 +38,8 @@ public sealed record ConversationEntrySnapshot(
     string? ActivityId = null,
     bool IsError = false,
     string? ActivityInput = null,
-    string? ActivityName = null);
+    string? ActivityName = null,
+    int? ConversationIndex = null);
 
 public sealed record ConversationSnapshot(
     SessionSnapshot Session,
@@ -58,28 +59,32 @@ public static class ConversationSnapshotFactory
                 StringComparer.Ordinal);
         var entries = new List<ConversationEntrySnapshot>();
 
-        foreach (var item in session.Conversation)
+        for (var index = 0; index < session.Conversation.Count; index++)
         {
+            var item = session.Conversation[index];
             switch (item)
             {
                 case UserMessage user:
                     entries.Add(new ConversationEntrySnapshot(
                         ConversationEntryKind.User,
-                        user.Text));
+                        user.Text,
+                        ConversationIndex: index));
                     break;
                 case AssistantMessage assistant:
                     entries.Add(new ConversationEntrySnapshot(
                         ConversationEntryKind.Assistant,
-                        assistant.Text));
+                        assistant.Text,
+                        ConversationIndex: index));
                     break;
                 case ModelAssistantOutput assistant:
                     entries.Add(new ConversationEntrySnapshot(
                         ConversationEntryKind.Assistant,
-                        assistant.Text));
+                        assistant.Text,
+                        ConversationIndex: index));
                     break;
                 case ModelToolCall call:
                     results.TryGetValue(call.CallId, out var result);
-                    entries.Add(CreateActivity(call, result));
+                    entries.Add(CreateActivity(call, result, index));
                     break;
             }
         }
@@ -91,7 +96,8 @@ public static class ConversationSnapshotFactory
 
     private static ConversationEntrySnapshot CreateActivity(
         ModelToolCall call,
-        ToolResult? result)
+        ToolResult? result,
+        int conversationIndex)
     {
         if (string.Equals(call.Name, "subagent", StringComparison.Ordinal))
         {
@@ -103,7 +109,8 @@ public static class ConversationSnapshotFactory
                 call.CallId,
                 result?.IsError ?? false,
                 task,
-                name);
+                name,
+                conversationIndex);
         }
 
         return new ConversationEntrySnapshot(
@@ -113,7 +120,8 @@ public static class ConversationSnapshotFactory
             call.CallId,
             result?.IsError ?? false,
             call.Arguments,
-            call.Name);
+            call.Name,
+            conversationIndex);
     }
 
     private static (string Name, string Task) ParseSubagent(string arguments)

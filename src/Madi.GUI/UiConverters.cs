@@ -57,7 +57,7 @@ public sealed class TimelineBrushConverter : IValueConverter
     {
         var color = value is TimelineItemKind kind ? kind switch
         {
-            TimelineItemKind.User => ColorHelper.FromArgb(255, 117, 224, 214),
+            TimelineItemKind.User => ColorHelper.FromArgb(45, 117, 224, 214),
             TimelineItemKind.Error => ColorHelper.FromArgb(70, 196, 43, 28),
             TimelineItemKind.Warning => ColorHelper.FromArgb(60, 255, 185, 0),
             TimelineItemKind.Tool => ColorHelper.FromArgb(45, 0, 120, 212),

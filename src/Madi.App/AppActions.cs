@@ -22,6 +22,10 @@ public sealed record ActivateSessionAction(string SessionId) : AppAction;
 
 public sealed record DeleteSessionAction(string SessionId) : AppAction;
 
+public sealed record DeleteConversationFromAction(
+    string SessionId,
+    int ConversationIndex) : AppAction;
+
 public sealed record DeleteWorkAction(string WorkId) : AppAction;
 
 public sealed record LoginAction : AppAction;

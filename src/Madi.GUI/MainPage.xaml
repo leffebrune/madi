@@ -58,6 +58,17 @@
                     <TextBlock Text="{Binding RoleLabel}"
                                FontWeight="SemiBold"
                                Visibility="{Binding ShowsRoleLabel, Converter={StaticResource BoolToVisibility}}" />
+                    <Button Width="28"
+                            Height="28"
+                            Padding="0"
+                            HorizontalAlignment="Right"
+                            IsEnabled="{Binding CanDeleteFromHere}"
+                            Visibility="{Binding IsUser, Converter={StaticResource BoolToVisibility}}"
+                            Click="OnConversationItemMenuClick"
+                            ToolTipService.ToolTip="메시지 메뉴"
+                            AutomationProperties.Name="사용자 메시지 메뉴">
+                        <FontIcon Glyph="&#xE712;" FontSize="12" />
+                    </Button>
                     <Grid ColumnSpacing="8"
                           HorizontalAlignment="Right"
                           Visibility="{Binding IsAssistant, Converter={StaticResource BoolToVisibility}}">
