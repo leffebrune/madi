@@ -28,6 +28,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private bool _supportsOAuth;
     private bool _followLatest = true;
     private string? _submittedDraft;
+    private TimelineItemViewModel? _pendingUserTimelineItem;
 
     public MainViewModel(
         MadiController controller,
@@ -189,6 +190,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(SendButtonText));
                 OnPropertyChanged(nameof(CanToggleAuthentication));
                 OnPropertyChanged(nameof(CanSelectReasoningEffort));
+                foreach (var item in Timeline)
+                {
+                    item.SetConversationInteraction(CanInteract);
+                }
             }
         }
     }
@@ -282,6 +287,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public Task DeleteSessionAsync(string sessionId) =>
         ExecuteAsync(new DeleteSessionAction(sessionId));
 
+    public Task DeleteConversationFromAsync(string sessionId, int conversationIndex) =>
+        !CanInteract
+            ? Task.CompletedTask
+            : ExecuteAsync(new DeleteConversationFromAction(sessionId, conversationIndex));
+
     public Task DeleteWorkAsync(string workId) =>
         ExecuteAsync(new DeleteWorkAction(workId));
 
@@ -368,16 +378,24 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 break;
             case AppConversationLoaded conversation:
                 FollowLatest = true;
+                _pendingUserTimelineItem = null;
                 ApplyConversation(conversation.Conversation);
                 break;
             case AppConversationCleared:
                 FollowLatest = true;
+                _pendingUserTimelineItem = null;
                 Timeline.Clear();
                 UsageText = "사용량 정보 없음";
                 break;
             case AppUserInput user:
                 FollowLatest = true;
-                Timeline.Add(new TimelineItemViewModel(TimelineItemKind.User, user.Text));
+                _pendingUserTimelineItem = new TimelineItemViewModel(
+                    TimelineItemKind.User,
+                    user.Text,
+                    sessionId: user.SessionId,
+                    conversationIndex: user.ConversationIndex);
+                _pendingUserTimelineItem.SetConversationInteraction(CanInteract);
+                Timeline.Add(_pendingUserTimelineItem);
                 UsageText = "응답 사용량 계산 중…";
                 Draft = string.Empty;
                 Suggestions.Clear();
@@ -386,6 +404,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 if (completed.Succeeded)
                 {
                     _submittedDraft = null;
+                    _pendingUserTimelineItem?.MarkConversationItemPersisted();
                 }
                 else
                 {
@@ -396,6 +415,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                         _submittedDraft = null;
                     }
                 }
+                _pendingUserTimelineItem = null;
                 break;
             case AppAssistantDelta delta:
                 var assistant = Timeline.LastOrDefault(static entry =>
@@ -604,7 +624,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 entry.Details,
                 entry.ActivityId,
                 isError: entry.IsError,
-                description: GetActivityDescription(entry)));
+                description: GetActivityDescription(entry),
+                sessionId: conversation.Session.Id,
+                conversationIndex: entry.ConversationIndex,
+                isPersistedConversationItem: true));
+            Timeline[^1].SetConversationInteraction(CanInteract);
         }
         HeaderTitle = conversation.Session.Title;
         TimelineChanged?.Invoke(this, EventArgs.Empty);

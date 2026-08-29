@@ -274,6 +274,64 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
         }
     }
 
+    public async Task RewriteConversationAsync(
+        Session session,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ValidateSession(session);
+
+        await FileLock.WaitAsync(cancellationToken);
+        try
+        {
+            var path = GetConversationPath(session.Id);
+            var directory = Path.GetDirectoryName(path)
+                ?? throw new InvalidOperationException("Conversation path must include a directory.");
+            Directory.CreateDirectory(directory);
+
+            var temporaryPath = $"{path}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                await using (var stream = new FileStream(
+                    temporaryPath,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    bufferSize: 4096,
+                    useAsync: true))
+                await using (var writer = new StreamWriter(stream, Utf8WithoutBom))
+                {
+                    for (var index = 0; index < session.Conversation.Count; index++)
+                    {
+                        var document = ConversationItemDocument.FromDomain(
+                            index,
+                            session.Conversation[index]);
+                        var json = JsonSerializer.Serialize(
+                            document,
+                            PersistenceJsonContext.Relaxed.ConversationItemDocument);
+                        await writer.WriteLineAsync(json.AsMemory(), cancellationToken);
+                    }
+
+                    await writer.FlushAsync(cancellationToken);
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                File.Move(temporaryPath, path, overwrite: true);
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+        }
+        finally
+        {
+            FileLock.Release();
+        }
+    }
+
     public async Task<bool> DeleteSessionAsync(
         string sessionId,
         CancellationToken cancellationToken = default)

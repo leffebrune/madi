@@ -236,7 +236,10 @@ public sealed class TimelineViewModelTests
         var snapshot = new ConversationSnapshot(
             new SessionSnapshot("session-1", "복원", null),
             [
-                new ConversationEntrySnapshot(ConversationEntryKind.User, "과거 질문"),
+                new ConversationEntrySnapshot(
+                    ConversationEntryKind.User,
+                    "과거 질문",
+                    ConversationIndex: 3),
                 new ConversationEntrySnapshot(
                     ConversationEntryKind.Tool,
                     "read",
@@ -250,6 +253,9 @@ public sealed class TimelineViewModelTests
 
         Assert.Equal("복원", viewModel.HeaderTitle);
         Assert.Equal(2, viewModel.Timeline.Count);
+        Assert.True(viewModel.Timeline[0].CanDeleteFromHere);
+        Assert.Equal("session-1", viewModel.Timeline[0].SessionId);
+        Assert.Equal(3, viewModel.Timeline[0].ConversationIndex);
         Assert.True(viewModel.Timeline[1].IsError);
         Assert.Equal(
             $"src/Main.cs{Environment.NewLine}offset 5 · limit 10",
@@ -326,6 +332,7 @@ public sealed class TimelineViewModelTests
         public Task SaveWorkAsync(Work work, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task SaveSessionAsync(Session session, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task AppendConversationAsync(Session session, int startIndex, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task RewriteConversationAsync(Session session, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task<bool> DeleteWorkAsync(string workId, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task SetCurrentAsync(Session session, CancellationToken cancellationToken = default) => Task.CompletedTask;

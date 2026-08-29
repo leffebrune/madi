@@ -370,6 +370,69 @@ public sealed partial class MainPage : Page
     private bool IsTimelineAtBottom() =>
         TimelineScroller.ScrollableHeight - TimelineScroller.VerticalOffset < TimelineBottomTolerance;
 
+    private void OnConversationItemMenuClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel?.CanInteract != true
+            || sender is not Button
+            {
+                DataContext: TimelineItemViewModel { CanDeleteFromHere: true } item,
+            } button)
+        {
+            return;
+        }
+
+        var deleteItem = new MenuFlyoutItem
+        {
+            Text = "여기서부터 삭제",
+            Icon = new FontIcon { Glyph = "\uE74D" },
+            Tag = item,
+        };
+        deleteItem.Click += OnDeleteConversationFrom;
+
+        var flyout = new MenuFlyout();
+        flyout.Items.Add(deleteItem);
+        flyout.ShowAt(button);
+    }
+
+    private async void OnDeleteConversationFrom(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel?.CanInteract != true
+            || sender is not MenuFlyoutItem
+            {
+                Tag: TimelineItemViewModel
+                {
+                    CanDeleteFromHere: true,
+                    SessionId: { } sessionId,
+                    ConversationIndex: { } conversationIndex,
+                },
+            })
+        {
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "여기서부터 삭제할까요?",
+            Content = new TextBlock
+            {
+                Text = "선택한 메시지와 그 이후의 모든 대화가 영구적으로 삭제됩니다.",
+                TextWrapping = TextWrapping.Wrap,
+            },
+            PrimaryButtonText = "삭제",
+            CloseButtonText = "취소",
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        await _viewModel.DeleteConversationFromAsync(sessionId, conversationIndex);
+        PromptBox.Focus(FocusState.Programmatic);
+    }
+
     private void OnCopyAssistantMarkdown(object sender, RoutedEventArgs e)
     {
         if (sender is not Button

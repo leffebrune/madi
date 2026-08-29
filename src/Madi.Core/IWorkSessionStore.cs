@@ -32,6 +32,10 @@ public interface IWorkSessionStore
         int startIndex,
         CancellationToken cancellationToken = default);
 
+    Task RewriteConversationAsync(
+        Session session,
+        CancellationToken cancellationToken = default);
+
     Task<bool> DeleteSessionAsync(
         string sessionId,
         CancellationToken cancellationToken = default);

@@ -130,6 +130,43 @@ public sealed class FileWorkSessionStoreTests
     }
 
     [Fact]
+    public async Task RewriteConversationTruncatesStoredItemsAndAllowsSubsequentAppend()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new FileWorkSessionStore(directory.Path);
+        var now = DateTimeOffset.UtcNow;
+        var session = new Session
+        {
+            Id = "session-1",
+            Title = "대화",
+            WorkingDirectory = directory.Path,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            Model = new ModelOptions("first"),
+        };
+        session.Conversation.AddRange([
+            new UserMessage("A"),
+            new AssistantMessage("a"),
+            new UserMessage("B"),
+            new AssistantMessage("b"),
+        ]);
+
+        await store.SaveSessionAsync(session);
+        await store.AppendConversationAsync(session, 0);
+        session.Conversation.RemoveRange(2, 2);
+        await store.RewriteConversationAsync(session);
+        session.Conversation.Add(new UserMessage("B-prime"));
+        await store.AppendConversationAsync(session, 2);
+
+        var loaded = await store.LoadConversationAsync(session.Id);
+
+        Assert.Equal(3, loaded!.Session.Conversation.Count);
+        Assert.Equal("A", Assert.IsType<UserMessage>(loaded.Session.Conversation[0]).Text);
+        Assert.Equal("a", Assert.IsType<AssistantMessage>(loaded.Session.Conversation[1]).Text);
+        Assert.Equal("B-prime", Assert.IsType<UserMessage>(loaded.Session.Conversation[2]).Text);
+    }
+
+    [Fact]
     public async Task DeleteSessionRemovesAllFilesAndClearsOnlyMatchingCurrentPointer()
     {
         using var directory = new TemporaryDirectory();

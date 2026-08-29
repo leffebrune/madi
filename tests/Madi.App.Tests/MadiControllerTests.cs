@@ -681,6 +681,97 @@ public sealed class MadiControllerTests
     }
 
     [Fact]
+    public async Task DeleteConversationFromUserMessageRemovesThatMessageAndEverythingAfterIt()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var session = Session("session-1", "기존 제목", null, "C:\\work", now);
+        session.Conversation.AddRange([
+            new UserMessage("A"),
+            new AssistantMessage("a"),
+            new UserMessage("B"),
+            new AssistantMessage("b"),
+            new UserMessage("C"),
+            new AssistantMessage("c"),
+            new UserMessage("D"),
+            new AssistantMessage("d"),
+        ]);
+        var store = new RecordingStore
+        {
+            Current = new CurrentConversation(null, session),
+        };
+        store.Sessions.Add(session);
+        var controller = CreateController(store: store);
+
+        var events = await CollectAsync(controller.ExecuteAsync(
+            new DeleteConversationFromAction(session.Id, 4)));
+
+        Assert.Collection(
+            session.Conversation,
+            item => Assert.Equal("A", Assert.IsType<UserMessage>(item).Text),
+            item => Assert.Equal("a", Assert.IsType<AssistantMessage>(item).Text),
+            item => Assert.Equal("B", Assert.IsType<UserMessage>(item).Text),
+            item => Assert.Equal("b", Assert.IsType<AssistantMessage>(item).Text));
+        Assert.Equal(1, store.RewriteConversationCount);
+        Assert.Same(session, store.LastSavedSession);
+        Assert.Equal("기존 제목", session.Title);
+        Assert.Equal(4, Assert.Single(events.OfType<AppConversationLoaded>())
+            .Conversation.Entries.Count);
+        Assert.Contains(events, item => item is AppTurnCompleted { Succeeded: true });
+    }
+
+    [Fact]
+    public async Task DeleteConversationFromRestoresMemoryWhenRewriteFails()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var session = Session("session-1", "대화", null, "C:\\work", now);
+        session.Conversation.AddRange([
+            new UserMessage("A"),
+            new AssistantMessage("a"),
+            new UserMessage("B"),
+            new AssistantMessage("b"),
+        ]);
+        var store = new RecordingStore
+        {
+            Current = new CurrentConversation(null, session),
+            RewriteFailuresRemaining = 1,
+        };
+        store.Sessions.Add(session);
+        var controller = CreateController(store: store);
+
+        var events = await CollectAsync(controller.ExecuteAsync(
+            new DeleteConversationFromAction(session.Id, 2)));
+
+        Assert.Equal(4, session.Conversation.Count);
+        Assert.Equal("B", Assert.IsType<UserMessage>(session.Conversation[2]).Text);
+        Assert.Equal(2, store.RewriteConversationCount);
+        Assert.Contains(events, item => item is AppTurnCompleted { Succeeded: false });
+    }
+
+    [Fact]
+    public async Task DeleteConversationFromRejectsAssistantMessage()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var session = Session("session-1", "대화", null, "C:\\work", now);
+        session.Conversation.AddRange([
+            new UserMessage("A"),
+            new AssistantMessage("a"),
+        ]);
+        var store = new RecordingStore
+        {
+            Current = new CurrentConversation(null, session),
+        };
+        store.Sessions.Add(session);
+        var controller = CreateController(store: store);
+
+        var events = await CollectAsync(controller.ExecuteAsync(
+            new DeleteConversationFromAction(session.Id, 1)));
+
+        Assert.Equal(2, session.Conversation.Count);
+        Assert.Equal(0, store.RewriteConversationCount);
+        Assert.Contains(events, item => item is AppTurnCompleted { Succeeded: false });
+    }
+
+    [Fact]
     public async Task DeleteSessionRejectsAConversationFromAnotherWorkspace()
     {
         var session = Session("other", "다른 폴더", null, "C:\\other", DateTimeOffset.UtcNow);
@@ -773,6 +864,8 @@ public sealed class MadiControllerTests
         public CurrentConversation? Current { get; set; }
         public Session? LastSavedSession { get; private set; }
         public List<int> AppendStartIndices { get; } = [];
+        public int RewriteConversationCount { get; private set; }
+        public int RewriteFailuresRemaining { get; set; }
         public int SetCurrentCount { get; private set; }
         public List<Work> Works { get; } = [];
         public List<Session> Sessions { get; } = [];
@@ -812,6 +905,18 @@ public sealed class MadiControllerTests
             CancellationToken cancellationToken = default)
         {
             AppendStartIndices.Add(startIndex);
+            return Task.CompletedTask;
+        }
+        public Task RewriteConversationAsync(
+            Session session,
+            CancellationToken cancellationToken = default)
+        {
+            RewriteConversationCount++;
+            if (RewriteFailuresRemaining > 0)
+            {
+                RewriteFailuresRemaining--;
+                throw new IOException("Conversation rewrite failed.");
+            }
             return Task.CompletedTask;
         }
         public Task<bool> DeleteSessionAsync(
