@@ -24,7 +24,10 @@ public sealed class FileSubagentCatalogTests
         var reviewer = subagents.Single(s => s.Name == "reviewer");
         Assert.Equal("OpenAI/gpt-5.6-luna:high", reviewer.Model);
         Assert.Equal(["read", "grep", "find"], reviewer.Tools);
+        Assert.Contains("only when the user explicitly requests a review", reviewer.Description);
+        Assert.Contains("at most once per user turn", reviewer.Description);
         Assert.Contains("code review specialist", reviewer.Instructions);
+        Assert.Contains("must not make consecutive reviewer calls", reviewer.Instructions);
 
         var scanner = subagents.Single(s => s.Name == "scanner");
         Assert.Equal("OpenAI/gpt-5.6-luna:medium", scanner.Model);
@@ -48,6 +51,31 @@ public sealed class FileSubagentCatalogTests
         Assert.Equal(
             "OpenAI API/api-model:medium",
             subagents.Single(item => item.Name == "scanner").Model);
+    }
+
+    [Fact]
+    public async Task PreviousReviewerDefaultMigratesToRestrictedInvocationPolicy()
+    {
+        using var directory = new TemporaryDirectory();
+        await new FileSubagentCatalog(directory.Path).LoadAsync();
+        var path = Path.Combine(directory.Path, "subagents", "reviewer.md");
+        var content = (await File.ReadAllTextAsync(path))
+            .ReplaceLineEndings("\n")
+            .Replace(
+                "description: Reviews code changes only when the user explicitly requests a review. Invoke at most once per user turn and never in consecutive calls.",
+                "description: Reviews code changes for correctness, regressions, missing validation, and maintainability risks.",
+                StringComparison.Ordinal)
+            .Replace(
+                "\nRun only when the user explicitly requested a review. The caller must invoke you at most once per user turn and must not make consecutive reviewer calls.\n",
+                string.Empty,
+                StringComparison.Ordinal);
+        await File.WriteAllTextAsync(path, content);
+
+        var subagents = await new FileSubagentCatalog(directory.Path).LoadAsync();
+
+        var reviewer = subagents.Single(item => item.Name == "reviewer");
+        Assert.Contains("only when the user explicitly requests a review", reviewer.Description);
+        Assert.Contains("must not make consecutive reviewer calls", reviewer.Instructions);
     }
 
     [Fact]

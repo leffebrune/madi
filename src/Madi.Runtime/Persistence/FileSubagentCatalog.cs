@@ -31,7 +31,7 @@ public sealed class FileSubagentCatalog : ISubagentCatalog
         ("reviewer.md", """
             ---
             name: reviewer
-            description: Reviews code changes for correctness, regressions, missing validation, and maintainability risks.
+            description: Reviews code changes only when the user explicitly requests a review. Invoke at most once per user turn and never in consecutive calls.
             model: OpenAI/gpt-5.6-luna:high
             tools:
               - read
@@ -41,6 +41,8 @@ public sealed class FileSubagentCatalog : ISubagentCatalog
 
             You are a code review specialist.
             Use grep for content searches and find for locating files.
+
+            Run only when the user explicitly requested a review. The caller must invoke you at most once per user turn and must not make consecutive reviewer calls.
 
             Inspect the changes and the surrounding code without modifying files. Prioritize concrete defects and regression risks over stylistic preferences.
 
@@ -107,13 +109,19 @@ public sealed class FileSubagentCatalog : ISubagentCatalog
                 StringComparison.Ordinal));
             if (defaultTemplate != default)
             {
-                var previousContent = GetPreviousDefaultContent(defaultTemplate.Content);
-                var legacyContent = GetLegacyDefaultContent(previousContent);
-                if (ContentEquals(content, defaultTemplate.Content)
-                    || ContentEquals(content, previousContent)
-                    || ContentEquals(content, ConfigureDefaultContent(previousContent))
-                    || ContentEquals(content, legacyContent)
-                    || ContentEquals(content, ConfigureDefaultContent(legacyContent)))
+                var previousPolicyContent = GetPreviousReviewerPolicyContent(defaultTemplate.Content);
+                var previousToolsContent = GetPreviousDefaultToolsContent(previousPolicyContent);
+                var legacyContent = GetLegacyDefaultContent(previousToolsContent);
+                var knownDefaults = new[]
+                {
+                    defaultTemplate.Content,
+                    previousPolicyContent,
+                    previousToolsContent,
+                    legacyContent,
+                };
+                if (knownDefaults.Any(defaultContent =>
+                        ContentEquals(content, defaultContent)
+                        || ContentEquals(content, ConfigureDefaultContent(defaultContent))))
                 {
                     content = ConfigureDefaultContent(defaultTemplate.Content);
                     await File.WriteAllTextAsync(path, content, cancellationToken);
@@ -146,8 +154,18 @@ public sealed class FileSubagentCatalog : ISubagentCatalog
         $"model: {_defaultModel}:",
         StringComparison.Ordinal);
 
-    private static string GetPreviousDefaultContent(string content) => content
+    private static string GetPreviousReviewerPolicyContent(string content) => content
         .ReplaceLineEndings("\n")
+        .Replace(
+            "description: Reviews code changes only when the user explicitly requests a review. Invoke at most once per user turn and never in consecutive calls.",
+            "description: Reviews code changes for correctness, regressions, missing validation, and maintainability risks.",
+            StringComparison.Ordinal)
+        .Replace(
+            "\nRun only when the user explicitly requested a review. The caller must invoke you at most once per user turn and must not make consecutive reviewer calls.\n",
+            string.Empty,
+            StringComparison.Ordinal);
+
+    private static string GetPreviousDefaultToolsContent(string content) => content
         .Replace("  - find\n", "  - find\n  - bash\n", StringComparison.Ordinal)
         .Replace(
             "\nUse grep for content searches and find for locating files.",
