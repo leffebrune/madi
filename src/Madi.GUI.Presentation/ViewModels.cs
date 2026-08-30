@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using Madi.App;
 using Madi.Core;
 
@@ -251,9 +252,13 @@ public sealed class TimelineItemViewModel : ObservableObject
     public void AddChildTool(CompactToolActivityViewModel tool)
     {
         ArgumentNullException.ThrowIfNull(tool);
+        tool.PropertyChanged += OnChildToolPropertyChanged;
         ChildTools.Add(tool);
         OnPropertyChanged(nameof(HasChildTools));
     }
+
+    private void OnChildToolPropertyChanged(object? sender, PropertyChangedEventArgs e) =>
+        OnPropertyChanged(nameof(ChildTools));
 
     internal static string FormatDuration(TimeSpan duration)
     {
