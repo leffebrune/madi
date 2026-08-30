@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using Madi.App;
 using Madi.GUI.Presentation;
 using Microsoft.UI.Xaml;
@@ -13,26 +15,45 @@ namespace Madi.GUI;
 
 public sealed partial class MainPage : Page
 {
+    private enum TimelineScrollMode
+    {
+        FollowLatest,
+        Free,
+    }
+
+    private const double TimelineBottomTolerance = 0.5;
     private readonly GuiSettingsStore _settings = new();
     private readonly ObservableCollection<string> _recentWorkspaces = [];
+    private readonly HashSet<TimelineItemViewModel> _observedTimelineItems = [];
     private MainViewModel? _viewModel;
     private CancellationTokenSource? _workspaceCancellation;
     private Control? _systemPromptPreviousFocus;
+    private TimelineScrollMode _timelineScrollMode = TimelineScrollMode.FollowLatest;
+    private bool _timelineScrollRequested;
+    private bool _timelineScrollScheduled;
+    private int _timelineScrollGeneration;
 
     public MainPage()
     {
         InitializeComponent();
+        TimelineScroller.AddHandler(
+            PointerWheelChangedEvent,
+            new PointerEventHandler(OnTimelinePointerWheelChanged),
+            handledEventsToo: true);
         RecentWorkspaceList.ItemsSource = _recentWorkspaces;
         Loaded += OnLoaded;
     }
 
     public void CancelAndDispose()
     {
+        DetachTimeline();
+        CancelTimelineScroll();
         _workspaceCancellation?.Cancel();
         _workspaceCancellation?.Dispose();
         _workspaceCancellation = null;
         if (_viewModel is not null)
         {
+            _viewModel.ExitRequested -= OnExitRequested;
             _viewModel.Cancel();
             _viewModel.Dispose();
             _viewModel = null;
@@ -120,11 +141,14 @@ public sealed partial class MainPage : Page
             _workspaceCancellation = new CancellationTokenSource();
             if (_viewModel is not null)
             {
+                DetachTimeline();
+                _viewModel.ExitRequested -= OnExitRequested;
                 _viewModel.Dispose();
             }
             _viewModel = new MainViewModel(
                 host.Controller,
                 new DispatcherQueueAdapter(DispatcherQueue));
+            AttachTimeline(_viewModel);
             _viewModel.ExitRequested += OnExitRequested;
             DataContext = _viewModel;
             await _viewModel.InitializeAsync(_workspaceCancellation.Token);
@@ -132,6 +156,7 @@ public sealed partial class MainPage : Page
             WorkspacePanel.Visibility = Visibility.Collapsed;
             Shell.Visibility = Visibility.Visible;
             LegacyInfoBar.IsOpen = _viewModel.LegacyItemCount > 0;
+            FollowLatestAndScroll();
             PromptBox.Focus(FocusState.Programmatic);
             _ = RunUtilityInstallerAsync(
                 host.UtilityInstaller,
@@ -172,6 +197,184 @@ public sealed partial class MainPage : Page
                 $"필수 유틸리티를 준비하지 못했습니다: {exception.Message}",
                 AppMessageKind.Warning));
         }
+    }
+
+    private void OnTimelinePointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        if (_timelineScrollMode == TimelineScrollMode.FollowLatest
+            && e.GetCurrentPoint(TimelineScroller).Properties.MouseWheelDelta > 0)
+        {
+            SetTimelineScrollMode(TimelineScrollMode.Free);
+        }
+    }
+
+    private void OnTimelinePreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (_timelineScrollMode == TimelineScrollMode.FollowLatest
+            && e.Key is VirtualKey.Up or VirtualKey.PageUp or VirtualKey.Home)
+        {
+            SetTimelineScrollMode(TimelineScrollMode.Free);
+        }
+    }
+
+    private void OnGoLatest(object sender, RoutedEventArgs e) => FollowLatestAndScroll();
+
+    private void FollowLatestAndScroll()
+    {
+        SetTimelineScrollMode(TimelineScrollMode.FollowLatest);
+        RequestTimelineScrollToEnd(requireAgentBusy: false);
+    }
+
+    private void SetTimelineScrollMode(TimelineScrollMode mode)
+    {
+        if (_timelineScrollMode == mode)
+        {
+            LatestButton.Visibility = mode == TimelineScrollMode.Free
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            return;
+        }
+
+        _timelineScrollMode = mode;
+        if (mode == TimelineScrollMode.Free)
+        {
+            CancelTimelineScroll();
+        }
+        LatestButton.Visibility = mode == TimelineScrollMode.Free
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void AttachTimeline(MainViewModel viewModel)
+    {
+        viewModel.Timeline.CollectionChanged += OnTimelineCollectionChanged;
+        foreach (var item in viewModel.Timeline)
+        {
+            AttachTimelineItem(item);
+        }
+    }
+
+    private void DetachTimeline()
+    {
+        if (_viewModel is not null)
+        {
+            _viewModel.Timeline.CollectionChanged -= OnTimelineCollectionChanged;
+        }
+        foreach (var item in _observedTimelineItems)
+        {
+            item.PropertyChanged -= OnTimelineItemPropertyChanged;
+        }
+        _observedTimelineItems.Clear();
+    }
+
+    private void OnTimelineCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (var item in e.OldItems.OfType<TimelineItemViewModel>())
+            {
+                DetachTimelineItem(item);
+            }
+        }
+        if (e.NewItems is not null)
+        {
+            foreach (var item in e.NewItems.OfType<TimelineItemViewModel>())
+            {
+                AttachTimelineItem(item);
+            }
+        }
+        if (e.Action == NotifyCollectionChangedAction.Reset && _viewModel is not null)
+        {
+            foreach (var item in _observedTimelineItems)
+            {
+                item.PropertyChanged -= OnTimelineItemPropertyChanged;
+            }
+            _observedTimelineItems.Clear();
+            foreach (var item in _viewModel.Timeline)
+            {
+                AttachTimelineItem(item);
+            }
+        }
+
+        RequestTimelineScrollToEnd(requireAgentBusy: true);
+    }
+
+    private void AttachTimelineItem(TimelineItemViewModel item)
+    {
+        if (_observedTimelineItems.Add(item))
+        {
+            item.PropertyChanged += OnTimelineItemPropertyChanged;
+        }
+    }
+
+    private void DetachTimelineItem(TimelineItemViewModel item)
+    {
+        if (_observedTimelineItems.Remove(item))
+        {
+            item.PropertyChanged -= OnTimelineItemPropertyChanged;
+        }
+    }
+
+    private void OnTimelineItemPropertyChanged(object? sender, PropertyChangedEventArgs e) =>
+        RequestTimelineScrollToEnd(requireAgentBusy: true);
+
+    private void RequestTimelineScrollToEnd(bool requireAgentBusy)
+    {
+        if (_timelineScrollMode != TimelineScrollMode.FollowLatest
+            || (requireAgentBusy && _viewModel?.IsBusy != true))
+        {
+            return;
+        }
+
+        _timelineScrollRequested = true;
+        if (_timelineScrollScheduled)
+        {
+            return;
+        }
+
+        _timelineScrollScheduled = true;
+        var generation = _timelineScrollGeneration;
+        if (!DispatcherQueue.TryEnqueue(
+                Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                () => ApplyTimelineScrollToEnd(generation)))
+        {
+            _timelineScrollScheduled = false;
+            _timelineScrollRequested = false;
+        }
+    }
+
+    private void ApplyTimelineScrollToEnd(int generation)
+    {
+        if (generation != _timelineScrollGeneration)
+        {
+            return;
+        }
+
+        _timelineScrollScheduled = false;
+        if (_timelineScrollMode != TimelineScrollMode.FollowLatest
+            || !_timelineScrollRequested)
+        {
+            return;
+        }
+
+        _timelineScrollRequested = false;
+        TimelineScroller.UpdateLayout();
+        var targetOffset = TimelineScroller.ScrollableHeight;
+        if (targetOffset - TimelineScroller.VerticalOffset > TimelineBottomTolerance)
+        {
+            TimelineScroller.ChangeView(
+                horizontalOffset: null,
+                verticalOffset: targetOffset,
+                zoomFactor: null,
+                disableAnimation: true);
+        }
+    }
+
+    private void CancelTimelineScroll()
+    {
+        _timelineScrollGeneration++;
+        _timelineScrollRequested = false;
+        _timelineScrollScheduled = false;
     }
 
     private void OnConversationItemMenuClick(object sender, RoutedEventArgs e)
@@ -273,6 +476,7 @@ public sealed partial class MainPage : Page
             && e.ClickedItem is NavigationItemViewModel { IsHeader: false, SessionId: { } id })
         {
             await _viewModel.ActivateSessionAsync(id);
+            FollowLatestAndScroll();
         }
     }
 
@@ -396,6 +600,7 @@ public sealed partial class MainPage : Page
         if (_viewModel?.CurrentWorkId is { } workId)
         {
             await _viewModel.CreateSessionAsync(workId);
+            FollowLatestAndScroll();
             PromptBox.Focus(FocusState.Programmatic);
         }
     }
@@ -405,6 +610,7 @@ public sealed partial class MainPage : Page
         if (_viewModel is not null)
         {
             await _viewModel.CreateSessionAsync(workId: null);
+            FollowLatestAndScroll();
             PromptBox.Focus(FocusState.Programmatic);
         }
     }
