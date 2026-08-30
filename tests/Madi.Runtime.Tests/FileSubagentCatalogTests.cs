@@ -36,7 +36,7 @@ public sealed class FileSubagentCatalogTests
     }
 
     [Fact]
-    public async Task UnmodifiedLegacyDefaultsMigrateToConfiguredModel()
+    public async Task ExistingDefaultsAreNotRewrittenForConfiguredModel()
     {
         using var directory = new TemporaryDirectory();
         await new FileSubagentCatalog(directory.Path).LoadAsync();
@@ -46,15 +46,15 @@ public sealed class FileSubagentCatalogTests
             "OpenAI API/api-model").LoadAsync();
 
         Assert.Equal(
-            "OpenAI API/api-model:high",
+            "OpenAI/gpt-5.6-luna:high",
             subagents.Single(item => item.Name == "reviewer").Model);
         Assert.Equal(
-            "OpenAI API/api-model:medium",
+            "OpenAI/gpt-5.6-luna:medium",
             subagents.Single(item => item.Name == "scanner").Model);
     }
 
     [Fact]
-    public async Task PreviousReviewerDefaultMigratesToRestrictedInvocationPolicy()
+    public async Task ExistingReviewerPolicyIsNotRewritten()
     {
         using var directory = new TemporaryDirectory();
         await new FileSubagentCatalog(directory.Path).LoadAsync();
@@ -74,12 +74,15 @@ public sealed class FileSubagentCatalogTests
         var subagents = await new FileSubagentCatalog(directory.Path).LoadAsync();
 
         var reviewer = subagents.Single(item => item.Name == "reviewer");
-        Assert.Contains("only when the user explicitly requests a review", reviewer.Description);
-        Assert.Contains("must not make consecutive reviewer calls", reviewer.Instructions);
+        Assert.Equal(
+            "Reviews code changes for correctness, regressions, missing validation, and maintainability risks.",
+            reviewer.Description);
+        Assert.DoesNotContain("must not make consecutive reviewer calls", reviewer.Instructions);
+        Assert.Equal(content, await File.ReadAllTextAsync(path));
     }
 
     [Fact]
-    public async Task LegacyDefaultToolsMigrateToDedicatedSearchTools()
+    public async Task ExistingLegacyToolsAreNotRewritten()
     {
         using var directory = new TemporaryDirectory();
         await new FileSubagentCatalog(directory.Path).LoadAsync();
@@ -101,8 +104,9 @@ public sealed class FileSubagentCatalogTests
         var subagents = await new FileSubagentCatalog(directory.Path).LoadAsync();
 
         Assert.Equal(
-            ["read", "grep", "find"],
+            ["read", "bash"],
             subagents.Single(item => item.Name == "scanner").Tools);
+        Assert.Equal(content, await File.ReadAllTextAsync(path));
     }
 
     [Fact]
@@ -125,12 +129,16 @@ public sealed class FileSubagentCatalogTests
             Custom instructions.
             """);
 
+        var customPath = Path.Combine(subagentsDir, "custom.md");
+        var customContent = await File.ReadAllTextAsync(customPath);
         var catalog = new FileSubagentCatalog(directory.Path);
         var subagents = await catalog.LoadAsync();
 
-        Assert.Single(subagents);
-        Assert.Equal("custom", subagents[0].Name);
-        Assert.False(File.Exists(Path.Combine(subagentsDir, "reviewer.md")));
+        Assert.Equal(3, subagents.Count);
+        Assert.Contains(subagents, item => item.Name == "custom");
+        Assert.True(File.Exists(Path.Combine(subagentsDir, "reviewer.md")));
+        Assert.True(File.Exists(Path.Combine(subagentsDir, "scanner.md")));
+        Assert.Equal(customContent, await File.ReadAllTextAsync(customPath));
     }
 
     private sealed class TemporaryDirectory : IDisposable

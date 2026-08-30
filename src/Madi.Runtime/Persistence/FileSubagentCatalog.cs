@@ -83,13 +83,13 @@ public sealed class FileSubagentCatalog : ISubagentCatalog
     public async Task<IReadOnlyList<SubagentDefinition>> LoadAsync(
         CancellationToken cancellationToken = default)
     {
-        if (!Directory.Exists(_directoryPath))
+        Directory.CreateDirectory(_directoryPath);
+        foreach (var (fileName, content) in DefaultSubagents)
         {
-            Directory.CreateDirectory(_directoryPath);
-            foreach (var (fileName, content) in DefaultSubagents)
+            var filePath = Path.Combine(_directoryPath, fileName);
+            if (!File.Exists(filePath))
             {
-                var filePath = Path.Combine(_directoryPath, fileName);
-                await File.WriteAllTextAsync(
+                await WriteNewDefaultAsync(
                     filePath,
                     ConfigureDefaultContent(content),
                     cancellationToken);
@@ -103,30 +103,6 @@ public sealed class FileSubagentCatalog : ISubagentCatalog
         {
             cancellationToken.ThrowIfCancellationRequested();
             var content = await File.ReadAllTextAsync(path, cancellationToken);
-            var defaultTemplate = DefaultSubagents.FirstOrDefault(item => string.Equals(
-                item.FileName,
-                Path.GetFileName(path),
-                StringComparison.Ordinal));
-            if (defaultTemplate != default)
-            {
-                var previousPolicyContent = GetPreviousReviewerPolicyContent(defaultTemplate.Content);
-                var previousToolsContent = GetPreviousDefaultToolsContent(previousPolicyContent);
-                var legacyContent = GetLegacyDefaultContent(previousToolsContent);
-                var knownDefaults = new[]
-                {
-                    defaultTemplate.Content,
-                    previousPolicyContent,
-                    previousToolsContent,
-                    legacyContent,
-                };
-                if (knownDefaults.Any(defaultContent =>
-                        ContentEquals(content, defaultContent)
-                        || ContentEquals(content, ConfigureDefaultContent(defaultContent))))
-                {
-                    content = ConfigureDefaultContent(defaultTemplate.Content);
-                    await File.WriteAllTextAsync(path, content, cancellationToken);
-                }
-            }
             var definition = Parse(path, content);
             if (!string.Equals(
                     Path.GetFileNameWithoutExtension(path),
@@ -154,35 +130,21 @@ public sealed class FileSubagentCatalog : ISubagentCatalog
         $"model: {_defaultModel}:",
         StringComparison.Ordinal);
 
-    private static string GetPreviousReviewerPolicyContent(string content) => content
-        .ReplaceLineEndings("\n")
-        .Replace(
-            "description: Reviews code changes only when the user explicitly requests a review. Invoke at most once per user turn and never in consecutive calls.",
-            "description: Reviews code changes for correctness, regressions, missing validation, and maintainability risks.",
-            StringComparison.Ordinal)
-        .Replace(
-            "\nRun only when the user explicitly requested a review. The caller must invoke you at most once per user turn and must not make consecutive reviewer calls.\n",
-            string.Empty,
-            StringComparison.Ordinal);
-
-    private static string GetPreviousDefaultToolsContent(string content) => content
-        .Replace("  - find\n", "  - find\n  - bash\n", StringComparison.Ordinal)
-        .Replace(
-            "\nUse grep for content searches and find for locating files.",
-            "\nUse grep for content searches and find for locating files; do not use bash for those tasks.",
-            StringComparison.Ordinal);
-
-    private static string GetLegacyDefaultContent(string content) => content
-        .Replace("  - grep\n  - find\n", string.Empty, StringComparison.Ordinal)
-        .Replace(
-            "\nUse grep for content searches and find for locating files; do not use bash for those tasks.",
-            string.Empty,
-            StringComparison.Ordinal);
-
-    private static bool ContentEquals(string left, string right) => string.Equals(
-        left.ReplaceLineEndings("\n"),
-        right.ReplaceLineEndings("\n"),
-        StringComparison.Ordinal);
+    private static async Task WriteNewDefaultAsync(
+        string path,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(
+            path,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.Read,
+            bufferSize: 4096,
+            useAsync: true);
+        await using var writer = new StreamWriter(stream);
+        await writer.WriteAsync(content.AsMemory(), cancellationToken);
+    }
 
     private SubagentDefinition Parse(string path, string content)
     {
