@@ -100,17 +100,27 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         get => _selectedModelName;
         private set
         {
-            if (SetProperty(ref _selectedModelName, value))
+            // Reassert the controller value even when the backing value is unchanged.
+            // A OneWay ComboBox can have a stale local selection after a rejected action.
+            if (!SetProperty(ref _selectedModelName, value))
             {
-                OnPropertyChanged(nameof(CanSelectReasoningEffort));
+                OnPropertyChanged();
             }
+            OnPropertyChanged(nameof(CanSelectReasoningEffort));
         }
     }
 
     public string? SelectedReasoningEffortKey
     {
         get => _selectedReasoningEffortKey;
-        private set => SetProperty(ref _selectedReasoningEffortKey, value);
+        private set
+        {
+            // Keep the selector synchronized for the same reason as SelectedModelName.
+            if (!SetProperty(ref _selectedReasoningEffortKey, value))
+            {
+                OnPropertyChanged();
+            }
+        }
     }
 
     public string? CurrentWorkId
@@ -447,7 +457,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 CompleteActivity(
                     tool.CallId,
                     tool.Name,
-                    $"### 인자\n```json\n{tool.Arguments}\n```\n\n### 결과\n```text\n{tool.Result}\n```",
+                    ActivityDetailsFormatter.FormatTool(tool.Arguments, tool.Result),
                     tool.IsError,
                     tool.ToolDuration);
                 break;
@@ -466,7 +476,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 CompleteActivity(
                     subagent.CallId,
                     subagent.Name,
-                    $"### 프롬프트\n{subagent.Prompt}\n\n### 결과\n{subagent.Response}",
+                    ActivityDetailsFormatter.FormatSubagent(subagent.Prompt, subagent.Response),
                     subagent.IsError,
                     subagent.ToolDuration);
                 break;

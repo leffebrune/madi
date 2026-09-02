@@ -71,6 +71,7 @@ public sealed class TimelineItemViewModel : ObservableObject
     private bool _isRunning;
     private bool _isError;
     private bool _isActivityExpanded;
+    private bool _isStandaloneDetailsExpanded;
     private TimeSpan? _toolDuration;
     private TimeSpan? _apiDuration;
     private bool _canInteractWithConversation;
@@ -130,6 +131,13 @@ public sealed class TimelineItemViewModel : ObservableObject
         or TimelineItemKind.Error;
     public bool ShowsStandaloneDetails => HasDetails && !IsActivity;
     public string ActivityToggleLabel => IsActivityExpanded ? "접기" : "펼치기";
+    public string RenderedText => IsActivity ? string.Empty : Text;
+    public string ActivityDetailsMarkdown => IsActivity && IsActivityExpanded
+        ? Details ?? string.Empty
+        : string.Empty;
+    public string StandaloneDetailsMarkdown => !IsActivity && IsStandaloneDetailsExpanded
+        ? Details ?? string.Empty
+        : string.Empty;
     public bool HasTiming => ApiDuration is not null || ToolDuration is not null;
     public string TimingText
     {
@@ -151,7 +159,13 @@ public sealed class TimelineItemViewModel : ObservableObject
     public string Text
     {
         get => _text;
-        set => SetProperty(ref _text, value);
+        set
+        {
+            if (SetProperty(ref _text, value))
+            {
+                OnPropertyChanged(nameof(RenderedText));
+            }
+        }
     }
 
     public string Description
@@ -169,6 +183,8 @@ public sealed class TimelineItemViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(HasDetails));
                 OnPropertyChanged(nameof(ShowsStandaloneDetails));
+                OnPropertyChanged(nameof(ActivityDetailsMarkdown));
+                OnPropertyChanged(nameof(StandaloneDetailsMarkdown));
             }
         }
     }
@@ -181,6 +197,19 @@ public sealed class TimelineItemViewModel : ObservableObject
             if (SetProperty(ref _isActivityExpanded, value))
             {
                 OnPropertyChanged(nameof(ActivityToggleLabel));
+                OnPropertyChanged(nameof(ActivityDetailsMarkdown));
+            }
+        }
+    }
+
+    public bool IsStandaloneDetailsExpanded
+    {
+        get => _isStandaloneDetailsExpanded;
+        set
+        {
+            if (SetProperty(ref _isStandaloneDetailsExpanded, value))
+            {
+                OnPropertyChanged(nameof(StandaloneDetailsMarkdown));
             }
         }
     }

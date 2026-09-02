@@ -105,7 +105,7 @@ public static class ConversationSnapshotFactory
             return new ConversationEntrySnapshot(
                 ConversationEntryKind.Subagent,
                 $"서브에이전트 {name}",
-                $"### 프롬프트\n{task}\n\n### 결과\n{result?.Output ?? "결과 없음"}",
+                ActivityDetailsFormatter.FormatSubagent(task, result?.Output),
                 call.CallId,
                 result?.IsError ?? false,
                 task,
@@ -116,7 +116,7 @@ public static class ConversationSnapshotFactory
         return new ConversationEntrySnapshot(
             ConversationEntryKind.Tool,
             call.Name,
-            $"### 인자\n```json\n{call.Arguments}\n```\n\n### 결과\n```text\n{result?.Output ?? "결과 없음"}\n```",
+            ActivityDetailsFormatter.FormatTool(call.Arguments, result?.Output),
             call.CallId,
             result?.IsError ?? false,
             call.Arguments,
