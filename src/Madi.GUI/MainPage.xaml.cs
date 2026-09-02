@@ -513,55 +513,57 @@ public sealed partial class MainPage : Page
         flyout.ShowAt(button);
     }
 
-    private async void OnDeleteSession(object sender, RoutedEventArgs e)
+    private async void OnNavigationListKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (_viewModel is null
-            || sender is not MenuFlyoutItem
-            {
-                Tag: NavigationItemViewModel { SessionId: { } sessionId } session,
-            })
+        if (e.Key != VirtualKey.Delete
+            || NavigationList.SelectedItem is not NavigationItemViewModel { HasMenu: true } item)
         {
             return;
         }
 
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = "대화를 삭제할까요?",
-            Content = new TextBlock
-            {
-                Text = $"‘{session.Title}’ 대화와 모든 기록이 영구적으로 삭제됩니다.",
-                TextWrapping = TextWrapping.Wrap,
-            },
-            PrimaryButtonText = "삭제",
-            CloseButtonText = "취소",
-            DefaultButton = ContentDialogButton.Close,
-        };
+        e.Handled = true;
+        await ConfirmAndDeleteNavigationItemAsync(item);
+    }
 
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+    private async void OnDeleteSession(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuFlyoutItem
+            {
+                Tag: NavigationItemViewModel { SessionId: not null } session,
+            })
         {
-            await _viewModel.DeleteSessionAsync(sessionId);
+            await ConfirmAndDeleteNavigationItemAsync(session);
         }
     }
 
     private async void OnDeleteWork(object sender, RoutedEventArgs e)
     {
-        if (_viewModel is null
-            || sender is not MenuFlyoutItem
+        if (sender is MenuFlyoutItem
             {
-                Tag: NavigationItemViewModel { WorkId: { } workId } work,
+                Tag: NavigationItemViewModel { IsHeader: true, WorkId: not null } work,
             })
+        {
+            await ConfirmAndDeleteNavigationItemAsync(work);
+        }
+    }
+
+    private async Task ConfirmAndDeleteNavigationItemAsync(NavigationItemViewModel item)
+    {
+        if (_viewModel is null)
         {
             return;
         }
 
+        var isWork = item is { IsHeader: true, WorkId: not null };
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
-            Title = "Work를 삭제할까요?",
+            Title = isWork ? "Work를 삭제할까요?" : "대화를 삭제할까요?",
             Content = new TextBlock
             {
-                Text = $"‘{work.Title}’ Work와 여기에 포함된 모든 대화가 영구적으로 삭제됩니다.",
+                Text = isWork
+                    ? $"‘{item.Title}’ Work와 여기에 포함된 모든 대화가 영구적으로 삭제됩니다."
+                    : $"‘{item.Title}’ 대화와 모든 기록이 영구적으로 삭제됩니다.",
                 TextWrapping = TextWrapping.Wrap,
             },
             PrimaryButtonText = "삭제",
@@ -569,9 +571,18 @@ public sealed partial class MainPage : Page
             DefaultButton = ContentDialogButton.Close,
         };
 
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
         {
-            await _viewModel.DeleteWorkAsync(workId);
+            return;
+        }
+
+        if (isWork)
+        {
+            await _viewModel.DeleteWorkAsync(item.WorkId!);
+        }
+        else if (item.SessionId is { } sessionId)
+        {
+            await _viewModel.DeleteSessionAsync(sessionId);
         }
     }
 
