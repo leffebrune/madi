@@ -210,6 +210,13 @@ public sealed partial class MainPage : Page
 
     private void OnTimelinePreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (e.Key == VirtualKey.End)
+        {
+            e.Handled = true;
+            FollowLatestAndScroll();
+            return;
+        }
+
         if (_timelineScrollMode == TimelineScrollMode.FollowLatest
             && e.Key is VirtualKey.Up or VirtualKey.PageUp or VirtualKey.Home)
         {

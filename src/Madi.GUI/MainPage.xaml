@@ -87,7 +87,7 @@
                                 ToolTipService.ToolTip="Markdown 원문 복사"
                                 AutomationProperties.Name="Markdown 원문 복사" />
                     </Grid>
-                    <local:MarkdownView Markdown="{Binding Text}"
+                    <local:MarkdownView Markdown="{Binding RenderedText}"
                                         Visibility="{Binding IsActivity, Converter={StaticResource InverseBoolToVisibility}}" />
                     <Grid ColumnSpacing="6"
                           Visibility="{Binding IsActivity, Converter={StaticResource BoolToVisibility}}">
@@ -129,7 +129,7 @@
                                 AutomationProperties.Name="{Binding ActivityToggleLabel}" />
                     </Grid>
                     <local:MarkdownView Margin="0,8,0,0"
-                                        Markdown="{Binding Details}"
+                                        Markdown="{Binding ActivityDetailsMarkdown}"
                                         Visibility="{Binding IsActivityExpanded, Converter={StaticResource BoolToVisibility}}" />
                     <StackPanel Margin="0,4,0,0"
                                 Spacing="6"
@@ -182,8 +182,10 @@
                         </ItemsControl>
                     </StackPanel>
                     <Expander Header="상세"
+                              IsExpanded="{Binding IsStandaloneDetailsExpanded, Mode=TwoWay}"
                               Visibility="{Binding ShowsStandaloneDetails, Converter={StaticResource BoolToVisibility}}">
-                        <local:MarkdownView Margin="0,8,0,0" Markdown="{Binding Details}" />
+                        <local:MarkdownView Margin="0,8,0,0"
+                                            Markdown="{Binding StandaloneDetailsMarkdown}" />
                     </Expander>
                 </StackPanel>
             </Border>

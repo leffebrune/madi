@@ -8,6 +8,44 @@ namespace Madi.GUI.Tests;
 public sealed class TimelineViewModelTests
 {
     [Fact]
+    public void DefersActivityMarkdownUntilExpanded()
+    {
+        var activity = new TimelineItemViewModel(
+            TimelineItemKind.Tool,
+            "read",
+            "long tool details");
+
+        Assert.Empty(activity.RenderedText);
+        Assert.Empty(activity.ActivityDetailsMarkdown);
+        Assert.Empty(activity.StandaloneDetailsMarkdown);
+
+        activity.IsActivityExpanded = true;
+
+        Assert.Equal("long tool details", activity.ActivityDetailsMarkdown);
+        Assert.Empty(activity.StandaloneDetailsMarkdown);
+
+        activity.IsActivityExpanded = false;
+
+        Assert.Empty(activity.ActivityDetailsMarkdown);
+    }
+
+    [Fact]
+    public void DefersStandaloneMarkdownUntilExpanded()
+    {
+        var information = new TimelineItemViewModel(
+            TimelineItemKind.Information,
+            "summary",
+            "standalone details");
+
+        Assert.Equal("summary", information.RenderedText);
+        Assert.Empty(information.StandaloneDetailsMarkdown);
+
+        information.IsStandaloneDetailsExpanded = true;
+
+        Assert.Equal("standalone details", information.StandaloneDetailsMarkdown);
+    }
+
+    [Fact]
     public async Task AppliesStreamingAndActivityEvents()
     {
         var viewModel = CreateViewModel();
@@ -254,6 +292,39 @@ public sealed class TimelineViewModelTests
         await viewModel.SetReasoningEffortAsync("instant");
 
         Assert.Equal("instant", viewModel.SelectedReasoningEffortKey);
+    }
+
+    [Fact]
+    public async Task SessionChangeReassertsModelAndReasoningSelectorValues()
+    {
+        var viewModel = CreateViewModel();
+        var model = new ModelOptions("first", ReasoningEffort.Medium, "test");
+
+        await viewModel.ApplyExternalEventAsync(new AppStateChanged(new AppState(
+            model,
+            Work: null,
+            new SessionSnapshot("session-1", "첫 대화", WorkId: null),
+            AppRunState.Idle,
+            AuthenticationKind.None,
+            AuthenticationState.NotRequired,
+            "C:\\work")));
+
+        var changedProperties = new List<string?>();
+        viewModel.PropertyChanged += (_, args) => changedProperties.Add(args.PropertyName);
+
+        await viewModel.ApplyExternalEventAsync(new AppStateChanged(new AppState(
+            model,
+            Work: null,
+            new SessionSnapshot("session-2", "둘째 대화", WorkId: null),
+            AppRunState.Idle,
+            AuthenticationKind.None,
+            AuthenticationState.NotRequired,
+            "C:\\work")));
+
+        Assert.Contains(nameof(MainViewModel.SelectedModelName), changedProperties);
+        Assert.Contains(nameof(MainViewModel.SelectedReasoningEffortKey), changedProperties);
+        Assert.Equal("test/first", viewModel.SelectedModelName);
+        Assert.Equal("medium", viewModel.SelectedReasoningEffortKey);
     }
 
     [Fact]

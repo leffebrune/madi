@@ -24,6 +24,8 @@ public sealed class MarkdownView : UserControl
         .DisableHtml()
         .Build();
 
+    private string? _renderedMarkdown;
+
     private readonly TextBlock _document = new()
     {
         FontSize = 15,
@@ -49,7 +51,18 @@ public sealed class MarkdownView : UserControl
 
     private void Render(string markdown)
     {
+        if (string.Equals(_renderedMarkdown, markdown, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _renderedMarkdown = markdown;
         _document.Inlines.Clear();
+        if (string.IsNullOrWhiteSpace(markdown))
+        {
+            return;
+        }
+
         var document = Markdig.Markdown.Parse(markdown, Pipeline);
         var state = new RenderState();
         AppendBlocks(document, _document.Inlines, state, listDepth: 0);
