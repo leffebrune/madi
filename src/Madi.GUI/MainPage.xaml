@@ -345,6 +345,7 @@
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollMode="Enabled"
                                   VerticalScrollBarVisibility="Auto"
+                                  ViewChanged="OnTimelineViewChanged"
                                   PreviewKeyDown="OnTimelinePreviewKeyDown"
                                   AutomationProperties.Name="대화 타임라인">
                         <ItemsControl ItemsSource="{Binding Timeline}"

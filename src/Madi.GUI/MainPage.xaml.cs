@@ -208,6 +208,16 @@ public sealed partial class MainPage : Page
         }
     }
 
+    private void OnTimelineViewChanged(object sender, ScrollViewerViewChangedEventArgs e)
+    {
+        if (_timelineScrollMode == TimelineScrollMode.Free
+            && TimelineScroller.ScrollableHeight - TimelineScroller.VerticalOffset
+                <= TimelineBottomTolerance)
+        {
+            SetTimelineScrollMode(TimelineScrollMode.FollowLatest);
+        }
+    }
+
     private void OnTimelinePreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key == VirtualKey.End)
