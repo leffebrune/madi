@@ -29,6 +29,7 @@ public sealed partial class MainPage : Page
     private CancellationTokenSource? _workspaceCancellation;
     private Control? _systemPromptPreviousFocus;
     private TimelineScrollMode _timelineScrollMode = TimelineScrollMode.FollowLatest;
+    private bool _sessionDeleteInProgress;
     private bool _timelineScrollRequested;
     private bool _timelineScrollScheduled;
     private int _timelineScrollGeneration;
@@ -477,7 +478,38 @@ public sealed partial class MainPage : Page
         {
             await _viewModel.ActivateSessionAsync(id);
             FollowLatestAndScroll();
+
+            // Activation rebuilds NavigationItems, invalidating the clicked item/container.
+            var selectedSession = _viewModel.NavigationItems.FirstOrDefault(item => item.SessionId == id);
+            NavigationList.SelectedItem = selectedSession;
+            if (selectedSession is not null)
+            {
+                NavigationList.ScrollIntoView(selectedSession);
+                NavigationList.UpdateLayout();
+                if (NavigationList.ContainerFromItem(selectedSession) is ListViewItem container)
+                {
+                    container.Focus(FocusState.Programmatic);
+                }
+                else
+                {
+                    NavigationList.Focus(FocusState.Programmatic);
+                }
+            }
         }
+    }
+
+    private async void OnNavigationPreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Delete
+            || _viewModel is not { CanInteract: true }
+            || NavigationList.SelectedItem is not NavigationItemViewModel { IsHeader: false, SessionId: not null } session)
+        {
+            return;
+        }
+
+        // Keep this shortcut scoped to the list, not text editing in the prompt.
+        e.Handled = true;
+        await ConfirmDeleteSessionAsync(session);
     }
 
     private void OnNavigationMenuClick(object sender, RoutedEventArgs e)
@@ -508,32 +540,46 @@ public sealed partial class MainPage : Page
 
     private async void OnDeleteSession(object sender, RoutedEventArgs e)
     {
-        if (_viewModel is null
-            || sender is not MenuFlyoutItem
-            {
-                Tag: NavigationItemViewModel { SessionId: { } sessionId } session,
-            })
+        if (sender is MenuFlyoutItem { Tag: NavigationItemViewModel session })
+        {
+            await ConfirmDeleteSessionAsync(session);
+        }
+    }
+
+    private async Task ConfirmDeleteSessionAsync(NavigationItemViewModel session)
+    {
+        if (_sessionDeleteInProgress
+            || _viewModel is not { CanInteract: true } viewModel
+            || session is not { IsHeader: false, SessionId: { } sessionId })
         {
             return;
         }
 
-        var dialog = new ContentDialog
+        _sessionDeleteInProgress = true;
+        try
         {
-            XamlRoot = XamlRoot,
-            Title = "대화를 삭제할까요?",
-            Content = new TextBlock
+            var dialog = new ContentDialog
             {
-                Text = $"‘{session.Title}’ 대화와 모든 기록이 영구적으로 삭제됩니다.",
-                TextWrapping = TextWrapping.Wrap,
-            },
-            PrimaryButtonText = "삭제",
-            CloseButtonText = "취소",
-            DefaultButton = ContentDialogButton.Close,
-        };
+                XamlRoot = XamlRoot,
+                Title = "대화를 삭제할까요?",
+                Content = new TextBlock
+                {
+                    Text = $"‘{session.Title}’ 대화와 모든 기록이 영구적으로 삭제됩니다.",
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                PrimaryButtonText = "삭제",
+                CloseButtonText = "취소",
+                DefaultButton = ContentDialogButton.Close,
+            };
 
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            {
+                await viewModel.DeleteSessionAsync(sessionId);
+            }
+        }
+        finally
         {
-            await _viewModel.DeleteSessionAsync(sessionId);
+            _sessionDeleteInProgress = false;
         }
     }
 
