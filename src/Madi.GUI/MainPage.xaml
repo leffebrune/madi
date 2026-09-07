@@ -251,7 +251,7 @@
                               ItemTemplate="{StaticResource NavigationTemplate}"
                               IsItemClickEnabled="True"
                               ItemClick="OnNavigationItemClick"
-                              KeyDown="OnNavigationListKeyDown"
+                              PreviewKeyDown="OnNavigationPreviewKeyDown"
                               SelectionMode="Single"
                               IsEnabled="{Binding CanInteract}"
                               AutomationProperties.Name="작업공간 대화 목록" />

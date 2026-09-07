@@ -29,6 +29,7 @@ public sealed partial class MainPage : Page
     private CancellationTokenSource? _workspaceCancellation;
     private Control? _systemPromptPreviousFocus;
     private TimelineScrollMode _timelineScrollMode = TimelineScrollMode.FollowLatest;
+    private bool _navigationDeleteInProgress;
     private bool _timelineScrollRequested;
     private bool _timelineScrollScheduled;
     private int _timelineScrollGeneration;
@@ -494,6 +495,23 @@ public sealed partial class MainPage : Page
         {
             await _viewModel.ActivateSessionAsync(id);
             FollowLatestAndScroll();
+
+            // Activation rebuilds NavigationItems, invalidating the clicked item/container.
+            var selectedSession = _viewModel.NavigationItems.FirstOrDefault(item => item.SessionId == id);
+            NavigationList.SelectedItem = selectedSession;
+            if (selectedSession is not null)
+            {
+                NavigationList.ScrollIntoView(selectedSession);
+                NavigationList.UpdateLayout();
+                if (NavigationList.ContainerFromItem(selectedSession) is ListViewItem container)
+                {
+                    container.Focus(FocusState.Programmatic);
+                }
+                else
+                {
+                    NavigationList.Focus(FocusState.Programmatic);
+                }
+            }
         }
     }
 
@@ -523,14 +541,16 @@ public sealed partial class MainPage : Page
         flyout.ShowAt(button);
     }
 
-    private async void OnNavigationListKeyDown(object sender, KeyRoutedEventArgs e)
+    private async void OnNavigationPreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key != VirtualKey.Delete
+            || _viewModel is not { CanInteract: true }
             || NavigationList.SelectedItem is not NavigationItemViewModel { HasMenu: true } item)
         {
             return;
         }
 
+        // Keep this shortcut scoped to the list, not text editing in the prompt.
         e.Handled = true;
         await ConfirmAndDeleteNavigationItemAsync(item);
     }
@@ -559,40 +579,50 @@ public sealed partial class MainPage : Page
 
     private async Task ConfirmAndDeleteNavigationItemAsync(NavigationItemViewModel item)
     {
-        if (_viewModel is null)
+        if (_navigationDeleteInProgress
+            || _viewModel is not { CanInteract: true } viewModel
+            || !item.HasMenu)
         {
             return;
         }
 
-        var isWork = item is { IsHeader: true, WorkId: not null };
-        var dialog = new ContentDialog
+        _navigationDeleteInProgress = true;
+        try
         {
-            XamlRoot = XamlRoot,
-            Title = isWork ? "Work를 삭제할까요?" : "대화를 삭제할까요?",
-            Content = new TextBlock
+            var isWork = item is { IsHeader: true, WorkId: not null };
+            var dialog = new ContentDialog
             {
-                Text = isWork
-                    ? $"‘{item.Title}’ Work와 여기에 포함된 모든 대화가 영구적으로 삭제됩니다."
-                    : $"‘{item.Title}’ 대화와 모든 기록이 영구적으로 삭제됩니다.",
-                TextWrapping = TextWrapping.Wrap,
-            },
-            PrimaryButtonText = "삭제",
-            CloseButtonText = "취소",
-            DefaultButton = ContentDialogButton.Close,
-        };
+                XamlRoot = XamlRoot,
+                Title = isWork ? "Work를 삭제할까요?" : "대화를 삭제할까요?",
+                Content = new TextBlock
+                {
+                    Text = isWork
+                        ? $"‘{item.Title}’ Work와 여기에 포함된 모든 대화가 영구적으로 삭제됩니다."
+                        : $"‘{item.Title}’ 대화와 모든 기록이 영구적으로 삭제됩니다.",
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                PrimaryButtonText = "삭제",
+                CloseButtonText = "취소",
+                DefaultButton = ContentDialogButton.Close,
+            };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                return;
+            }
 
-        if (isWork)
-        {
-            await _viewModel.DeleteWorkAsync(item.WorkId!);
+            if (isWork)
+            {
+                await viewModel.DeleteWorkAsync(item.WorkId!);
+            }
+            else if (item.SessionId is { } sessionId)
+            {
+                await viewModel.DeleteSessionAsync(sessionId);
+            }
         }
-        else if (item.SessionId is { } sessionId)
+        finally
         {
-            await _viewModel.DeleteSessionAsync(sessionId);
+            _navigationDeleteInProgress = false;
         }
     }
 
