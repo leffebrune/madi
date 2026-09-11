@@ -231,6 +231,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             await _dispatcher.InvokeAsync(() => ApplyConversation(conversation));
         }
+        if (_controller.InitializationMessage is { } message)
+        {
+            await _dispatcher.InvokeAsync(() => ApplyEvent(message));
+        }
     }
 
     public Task SendOrCancelAsync()

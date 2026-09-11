@@ -63,6 +63,9 @@ public sealed class MadiController
 
     public IReadOnlyList<AvailableModel> AvailableModels => _availableModels;
 
+    /// <summary>Model recovery notice to display after the startup conversation is restored.</summary>
+    public AppMessage? InitializationMessage { get; private set; }
+
     /// <summary>
     /// The exact system instruction currently used by the agent for every session.
     /// </summary>
@@ -81,14 +84,17 @@ public sealed class MadiController
         if (current is not null
             && IsCurrentWorkspace(current.Session.WorkingDirectory))
         {
+            var resolved = ResolvePersistedModel(current.Session, out var message);
             _currentWork = current.Work;
             _currentSession = current.Session;
-            _selectedModel = current.Session.Model;
+            _selectedModel = resolved;
+            InitializationMessage = message;
         }
 
-        _selectedModel = _currentSession is null
-            ? NormalizeReasoningEffort(_authentication.ResolveModel(_selectedModel))
-            : ResolvePersistedModel(_currentSession);
+        if (_currentSession is null)
+        {
+            _selectedModel = NormalizeReasoningEffort(_authentication.ResolveModel(_selectedModel));
+        }
         if (_currentSession is not null && _currentSession.Model != _selectedModel)
         {
             _currentSession.Model = _selectedModel;
@@ -826,9 +832,10 @@ public sealed class MadiController
             yield break;
         }
 
+        var resolvedModel = ResolvePersistedModel(conversation.Session, out var modelMessage);
         _currentWork = conversation.Work;
         _currentSession = conversation.Session;
-        _selectedModel = ResolvePersistedModel(conversation.Session);
+        _selectedModel = resolvedModel;
         conversation.Session.Model = _selectedModel;
         await _store.SaveSessionAsync(conversation.Session, cancellationToken);
         await _store.SetCurrentAsync(conversation.Session, cancellationToken);
@@ -836,6 +843,10 @@ public sealed class MadiController
 
         yield return new AppConversationLoaded(
             ConversationSnapshotFactory.Create(conversation.Session));
+        if (modelMessage is not null)
+        {
+            yield return modelMessage;
+        }
         yield return new AppStateChanged(CreateState());
         yield return new AppTurnCompleted(true);
     }
@@ -956,6 +967,7 @@ public sealed class MadiController
             // Move the durable pointer first so it can never reference a deleted session.
             if (replacement is not null)
             {
+                _ = ResolvePersistedModel(replacement.Session, out _);
                 await _store.SetCurrentAsync(replacement.Session, cancellationToken);
             }
         }
@@ -1005,10 +1017,14 @@ public sealed class MadiController
 
         if (deletesCurrent && _currentSession is not null)
         {
-            _selectedModel = ResolvePersistedModel(_currentSession);
+            _selectedModel = ResolvePersistedModel(_currentSession, out var modelMessage);
             _currentSession.Model = _selectedModel;
             await _store.SaveSessionAsync(_currentSession, cancellationToken);
             await RefreshAuthenticationAsync(cancellationToken);
+            if (modelMessage is not null)
+            {
+                yield return modelMessage;
+            }
         }
 
         yield return new AppNavigationChanged(
@@ -1058,6 +1074,7 @@ public sealed class MadiController
 
             if (replacement is not null)
             {
+                _ = ResolvePersistedModel(replacement.Session, out _);
                 await _store.SetCurrentAsync(replacement.Session, cancellationToken);
             }
         }
@@ -1107,10 +1124,14 @@ public sealed class MadiController
 
         if (deletesCurrent && _currentSession is not null)
         {
-            _selectedModel = ResolvePersistedModel(_currentSession);
+            _selectedModel = ResolvePersistedModel(_currentSession, out var modelMessage);
             _currentSession.Model = _selectedModel;
             await _store.SaveSessionAsync(_currentSession, cancellationToken);
             await RefreshAuthenticationAsync(cancellationToken);
+            if (modelMessage is not null)
+            {
+                yield return modelMessage;
+            }
         }
 
         yield return new AppNavigationChanged(
@@ -1354,11 +1375,27 @@ public sealed class MadiController
         _authenticationState,
         _workingDirectory);
 
-    private ModelOptions ResolvePersistedModel(Session session)
+    private ModelOptions ResolvePersistedModel(Session session, out AppMessage? message)
     {
+        message = null;
         var options = session.Model;
         if (!string.IsNullOrWhiteSpace(options.Provider))
         {
+            var providerModels = _availableModels.Where(model => string.Equals(
+                model.Provider, options.Provider, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (providerModels.Length == 0)
+            {
+                throw new InvalidOperationException(
+                    $"세션의 provider '{options.Provider}'를 현재 모델 설정에서 찾을 수 없거나 사용 가능한 모델이 없습니다. 세션을 열 수 없습니다.");
+            }
+            if (!providerModels.Any(model => string.Equals(
+                    model.Name, options.Model, StringComparison.OrdinalIgnoreCase)))
+            {
+                var replacement = providerModels[0];
+                message = new AppMessage(
+                    $"기존 모델 '{options.QualifiedName}'을 현재 모델 설정에서 찾을 수 없어 같은 provider의 첫 번째 모델을 자동 선택했습니다: {replacement.QualifiedName}");
+                options = options with { Model = replacement.Name, Provider = replacement.Provider };
+            }
             return NormalizeReasoningEffort(_authentication.ResolveModel(options));
         }
 

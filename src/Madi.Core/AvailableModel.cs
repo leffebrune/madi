@@ -10,6 +10,8 @@ public sealed record AvailableModel
     public required string Api { get; init; }
     public string? BaseUrl { get; init; }
     public string? ApiKey { get; init; }
+    /// <summary>Whether to send prompt_cache_key; inherited from provider configuration.</summary>
+    public bool SendPromptCacheKey { get; init; } = true;
     public bool SupportsReasoning { get; init; }
     public int MaxContextTokens { get; init; }
     public int? MaxOutputTokens { get; init; }

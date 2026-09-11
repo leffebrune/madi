@@ -118,6 +118,31 @@ public sealed class OpenAIResponseProviderTests
         Assert.Equal("test_tool", tool.GetProperty("name").GetString());
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task SendsPromptCacheKeyOnlyWhenEnabled(bool oauth, bool sendPromptCacheKey)
+    {
+        var client = RecordingNetworkClient.Completing();
+        IModelProvider provider = oauth
+            ? new OpenAIOAuthProvider(client, sendPromptCacheKey)
+            : new OpenAIResponseProvider(client, sendPromptCacheKey);
+        var request = CreateRequest();
+
+        await CollectAsync(provider.StreamAsync(request));
+
+        using var document = JsonDocument.Parse(Assert.IsType<string>(client.Content));
+        Assert.Equal(sendPromptCacheKey,
+            document.RootElement.TryGetProperty("prompt_cache_key", out var key));
+        if (sendPromptCacheKey)
+        {
+            Assert.Equal(request.PromptCacheKey, key.GetString());
+        }
+        Assert.True(document.RootElement.GetProperty("stream").GetBoolean());
+    }
+
     [Fact]
     public async Task ParsesTextToolCallAndUsageFromStream()
     {

@@ -196,7 +196,8 @@ public sealed class CatalogModelProvider : IModelProviderRuntime
             model.Provider,
             model.Api,
             model.BaseUrl,
-            model.ApiKey);
+            model.ApiKey,
+            model.SendPromptCacheKey);
         lock (_providerLock)
         {
             if (_providers.TryGetValue(key, out var provider))
@@ -222,14 +223,16 @@ public sealed class CatalogModelProvider : IModelProviderRuntime
         return model.Api.ToLowerInvariant() switch
         {
             OpenAIOAuthProvider.ProviderId => new OpenAIOAuthProvider(
-                new NetworkClient(OpenAINetworkConfiguration.Create(_oauthAuthentication))),
+                new NetworkClient(OpenAINetworkConfiguration.Create(_oauthAuthentication)),
+                model.SendPromptCacheKey),
             OpenAIResponseProvider.ProviderId => new OpenAIResponseProvider(
                 model.BaseUrl
                     ?? throw new InvalidOperationException(
                         $"모델 '{model.QualifiedName}'의 baseUrl이 필요합니다."),
                 model.ApiKey
                     ?? throw new InvalidOperationException(
-                        $"모델 '{model.QualifiedName}'의 apiKey가 필요합니다.")),
+                        $"모델 '{model.QualifiedName}'의 apiKey가 필요합니다."),
+                model.SendPromptCacheKey),
             _ => throw new InvalidOperationException(
                 $"지원하지 않는 provider API입니다: {model.Api}"),
         };
@@ -239,5 +242,6 @@ public sealed class CatalogModelProvider : IModelProviderRuntime
         string Provider,
         string Api,
         string? BaseUrl,
-        string? ApiKey);
+        string? ApiKey,
+        bool SendPromptCacheKey);
 }

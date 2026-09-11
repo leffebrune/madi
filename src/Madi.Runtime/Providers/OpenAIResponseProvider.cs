@@ -10,20 +10,22 @@ public sealed class OpenAIResponseProvider : IModelProvider
     public const string ProviderId = "openai-responses";
 
     private readonly INetworkClient _client;
+    private readonly bool _sendPromptCacheKey;
 
-    public OpenAIResponseProvider(string baseUrl, string apiKey)
-        : this(new NetworkClient(OpenAIResponseNetworkConfiguration.Create(baseUrl, apiKey)))
+    public OpenAIResponseProvider(string baseUrl, string apiKey, bool sendPromptCacheKey = true)
+        : this(new NetworkClient(OpenAIResponseNetworkConfiguration.Create(baseUrl, apiKey)), sendPromptCacheKey)
     {
     }
 
-    public OpenAIResponseProvider(Uri baseUrl, string apiKey)
-        : this(new NetworkClient(OpenAIResponseNetworkConfiguration.Create(baseUrl, apiKey)))
+    public OpenAIResponseProvider(Uri baseUrl, string apiKey, bool sendPromptCacheKey = true)
+        : this(new NetworkClient(OpenAIResponseNetworkConfiguration.Create(baseUrl, apiKey)), sendPromptCacheKey)
     {
     }
 
-    public OpenAIResponseProvider(INetworkClient client)
+    public OpenAIResponseProvider(INetworkClient client, bool sendPromptCacheKey = true)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
+        _sendPromptCacheKey = sendPromptCacheKey;
     }
 
     public string Id => ProviderId;
@@ -36,7 +38,8 @@ public sealed class OpenAIResponseProvider : IModelProvider
                            _client,
                            ProviderId,
                            request,
-                           cancellationToken: cancellationToken))
+                           cancellationToken: cancellationToken,
+                           sendPromptCacheKey: _sendPromptCacheKey))
         {
             yield return item;
         }
