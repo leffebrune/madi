@@ -31,7 +31,9 @@ public sealed class SubagentRunnerTests
             provider,
             [definition],
             [model],
-            [new ReadTool()]);
+            [new ReadTool()],
+            runtimeContextProvider: () => new AgentRuntimeContext(
+                new DateOnly(2026, 8, 15), "/workspace", "Test OS", "/bin/bash"));
 
         await runner.RunAsync("reviewer", "Review this change.");
 
@@ -41,6 +43,10 @@ public sealed class SubagentRunnerTests
         Assert.Contains("# Available tools", request.Instructions);
         Assert.Contains("## read", request.Instructions);
         Assert.Contains("\"path\"", request.Instructions);
+        Assert.Contains("Current date: 2026-08-15", request.Instructions);
+        Assert.Contains("Working directory: \"/workspace\"", request.Instructions);
+        Assert.Contains("OS: \"Test OS\"", request.Instructions);
+        Assert.Contains("Shell: \"/bin/bash\"", request.Instructions);
     }
 
     [Fact]

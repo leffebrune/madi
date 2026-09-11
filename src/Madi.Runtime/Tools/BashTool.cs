@@ -193,7 +193,8 @@ public sealed class BashTool : ITool
         return info;
     }
 
-    private string ResolveShell()
+    /// <summary>Resolves the executable using the same rules as command execution.</summary>
+    public string ResolveShell()
     {
         if (_shellPath is not null)
         {

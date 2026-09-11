@@ -11,13 +11,15 @@ public sealed class SubagentRunner : ISubagentRunner
     private readonly IReadOnlyDictionary<string, ITool> _tools;
     private readonly IReadOnlyList<AvailableModel> _availableModels;
     private readonly SemaphoreSlim _concurrencyGate;
+    private readonly Func<AgentRuntimeContext>? _runtimeContextProvider;
 
     public SubagentRunner(
         IModelProvider provider,
         IReadOnlyList<SubagentDefinition> definitions,
         IReadOnlyList<AvailableModel> availableModels,
         IReadOnlyList<ITool> tools,
-        int maxConcurrency = 4)
+        int maxConcurrency = 4,
+        Func<AgentRuntimeContext>? runtimeContextProvider = null)
     {
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         ArgumentNullException.ThrowIfNull(definitions);
@@ -30,6 +32,7 @@ public sealed class SubagentRunner : ISubagentRunner
                 "Maximum subagent concurrency must be greater than zero.");
         }
 
+        _runtimeContextProvider = runtimeContextProvider;
         _availableModels = availableModels;
         _tools = tools.ToDictionary(static tool => tool.Name, StringComparer.Ordinal);
         _definitions = definitions.ToDictionary(
@@ -106,7 +109,7 @@ public sealed class SubagentRunner : ISubagentRunner
             var systemInstructions = SystemInstructionComposer.Compose(
                 definition.Instructions,
                 childTools);
-            IAgent agent = new Agent(_provider, systemInstructions, childTools);
+            IAgent agent = new Agent(_provider, systemInstructions, childTools, _runtimeContextProvider);
             var session = new Session
             {
                 Id = $"subagent-{Guid.CreateVersion7()}",
