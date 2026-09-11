@@ -26,6 +26,27 @@ public sealed class ToolCatalog
         _tools = All.ToDictionary(static tool => tool.Name, StringComparer.Ordinal);
     }
 
+    /// <summary>Captures local date and the actual tool environment without executing a command.</summary>
+    public AgentRuntimeContext CreateRuntimeContext(TimeProvider? timeProvider = null)
+    {
+        string shell;
+        try
+        {
+            shell = Bash.ResolveShell();
+        }
+        catch (FileNotFoundException)
+        {
+            // Missing optional utilities must not prevent the agent from starting.
+            shell = "Unavailable (no configured shell executable found)";
+        }
+
+        return new AgentRuntimeContext(
+            DateOnly.FromDateTime((timeProvider ?? TimeProvider.System).GetLocalNow().DateTime),
+            WorkingDirectory,
+            System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+            shell);
+    }
+
     public string WorkingDirectory { get; }
     public ReadTool Read { get; }
     public WriteTool Write { get; }

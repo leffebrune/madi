@@ -9,6 +9,19 @@ namespace Madi.Core;
 /// </summary>
 public static class SystemInstructionComposer
 {
+    public static string AppendRuntimeContext(string instructions, AgentRuntimeContext context)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(instructions);
+        ArgumentNullException.ThrowIfNull(context);
+
+        // Keep the static prefix intact. Serialize environment strings as data on a single line.
+        return instructions.TrimEnd() + "\n\n# Runtime context\n"
+            + "Current date: " + context.CurrentDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) + "\n"
+            + "Working directory: " + JsonSerializer.Serialize(context.WorkingDirectory) + "\n"
+            + "OS: " + JsonSerializer.Serialize(context.OperatingSystem) + "\n"
+            + "Shell: " + JsonSerializer.Serialize(context.Shell);
+    }
+
     public static string Compose(string systemPrompt, IReadOnlyList<ITool> tools)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(systemPrompt);

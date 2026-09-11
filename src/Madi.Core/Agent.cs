@@ -17,22 +17,31 @@ public sealed class Agent : IAgent
     private readonly IReadOnlyList<ITool> _tools;
     private readonly IReadOnlyDictionary<string, ITool> _toolsByName;
     private string _systemInstructions;
+    private readonly Func<AgentRuntimeContext>? _runtimeContextProvider;
 
     public Agent(
         IModelProvider provider,
         string systemInstructions,
-        IReadOnlyList<ITool>? tools = null)
+        IReadOnlyList<ITool>? tools = null,
+        Func<AgentRuntimeContext>? runtimeContextProvider = null)
     {
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         ArgumentException.ThrowIfNullOrWhiteSpace(systemInstructions);
         _systemInstructions = systemInstructions;
+        _runtimeContextProvider = runtimeContextProvider;
         _tools = tools ?? [];
         _toolsByName = _tools.ToDictionary(static tool => tool.Name, StringComparer.Ordinal);
     }
 
     public string SystemInstructions
     {
-        get => Volatile.Read(ref _systemInstructions);
+        get
+        {
+            var instructions = Volatile.Read(ref _systemInstructions);
+            return _runtimeContextProvider is null
+                ? instructions
+                : SystemInstructionComposer.AppendRuntimeContext(instructions, _runtimeContextProvider());
+        }
         set
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(value);

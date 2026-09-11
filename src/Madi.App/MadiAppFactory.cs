@@ -50,12 +50,15 @@ public static class MadiAppFactory
                 provider,
                 subagentDefinitions,
                 availableModels,
-                tools.All);
+                tools.All,
+                runtimeContextProvider: () => tools.CreateRuntimeContext());
             agentTools.Add(new SubagentTool(subagentRunner, subagentDefinitions));
         }
 
         var systemInstructions = SystemInstructionComposer.Compose(systemPrompt, agentTools);
-        IAgent agent = new Agent(provider, systemInstructions, agentTools);
+        IAgent agent = new Agent(
+            provider, systemInstructions, agentTools,
+            runtimeContextProvider: () => tools.CreateRuntimeContext());
         var defaultAvailableModel = availableModels.FirstOrDefault()
             ?? throw new InvalidDataException("사용 가능한 모델이 없습니다.");
         var defaultModel = new ModelOptions(
