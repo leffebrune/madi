@@ -9,10 +9,12 @@ public sealed class OpenAIOAuthProvider : IModelProvider
     public const string ProviderId = "openai-codex";
 
     private readonly INetworkClient _client;
+    private readonly bool _sendPromptCacheKey;
 
-    public OpenAIOAuthProvider(INetworkClient client)
+    public OpenAIOAuthProvider(INetworkClient client, bool sendPromptCacheKey = true)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
+        _sendPromptCacheKey = sendPromptCacheKey;
     }
 
     public string Id => ProviderId;
@@ -36,7 +38,8 @@ public sealed class OpenAIOAuthProvider : IModelProvider
                            request,
                            headers,
                            includeCodexExtensions: true,
-                           cancellationToken))
+                           cancellationToken,
+                           sendPromptCacheKey: _sendPromptCacheKey))
         {
             yield return item;
         }

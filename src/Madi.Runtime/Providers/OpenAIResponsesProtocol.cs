@@ -15,13 +15,14 @@ internal static class OpenAIResponsesProtocol
         ModelRequest request,
         IReadOnlyDictionary<string, string>? headers = null,
         bool includeCodexExtensions = false,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default,
+        bool sendPromptCacheKey = true)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentException.ThrowIfNullOrWhiteSpace(providerId);
         ArgumentNullException.ThrowIfNull(request);
 
-        var content = CreateRequestBody(request, providerId, includeCodexExtensions);
+        var content = CreateRequestBody(request, providerId, includeCodexExtensions, sendPromptCacheKey);
         yield return new ModelRequestStarted(content);
 
         var outputText = new StringBuilder();
@@ -110,7 +111,8 @@ internal static class OpenAIResponsesProtocol
     private static string CreateRequestBody(
         ModelRequest request,
         string providerId,
-        bool includeCodexExtensions)
+        bool includeCodexExtensions,
+        bool sendPromptCacheKey)
     {
         using var output = new MemoryStream();
         using (var writer = new Utf8JsonWriter(output))
@@ -162,7 +164,10 @@ internal static class OpenAIResponsesProtocol
                 }
                 writer.WriteEndArray();
             }
-            writer.WriteString("prompt_cache_key", request.PromptCacheKey);
+            if (sendPromptCacheKey)
+            {
+                writer.WriteString("prompt_cache_key", request.PromptCacheKey);
+            }
             writer.WriteString("tool_choice", "auto");
             writer.WriteBoolean("parallel_tool_calls", request.AllowParallelToolCalls);
             if (request.Options.ReasoningEffort is { } effort)

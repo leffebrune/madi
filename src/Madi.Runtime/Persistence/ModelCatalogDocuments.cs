@@ -8,6 +8,8 @@ internal sealed record ModelProviderDocument
     public string? BaseUrl { get; init; }
     public string? ApiKey { get; init; }
     public string Api { get; init; } = string.Empty;
+    // Nullable so omitted values retain the legacy behavior during source-generated deserialization.
+    public bool? SendPromptCacheKey { get; init; } = true;
     public List<ModelEntryDocument> Models { get; init; } = [];
 
     public IReadOnlyList<AvailableModel> ToDomain()
@@ -42,6 +44,7 @@ internal sealed record ModelEntryDocument
             Api = provider.Api,
             BaseUrl = provider.BaseUrl,
             ApiKey = provider.ApiKey,
+            SendPromptCacheKey = provider.SendPromptCacheKey ?? true,
             SupportsReasoning = SupportsReasoning,
             MaxContextTokens = MaxContextTokens,
             MaxOutputTokens = MaxOutputTokens,

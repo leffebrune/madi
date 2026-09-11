@@ -23,6 +23,7 @@ public sealed class FileModelCatalogTests
         Assert.Equal("OpenAI", models[0].Provider);
         Assert.Equal("openai-codex", models[0].Api);
         Assert.Null(models[0].BaseUrl);
+        Assert.True(models[0].SendPromptCacheKey);
         Assert.True(models[0].SupportsReasoning);
 
         Assert.Equal("gpt-5.6-terra", models[1].Name);
@@ -95,6 +96,34 @@ public sealed class FileModelCatalogTests
         Assert.Equal("OpenAI API/gpt-test", model.QualifiedName);
         Assert.Equal("https://api.openai.com/v1", model.BaseUrl);
         Assert.Equal("sk-direct-key", model.ApiKey);
+    }
+
+    [Theory]
+    [InlineData("", true)]
+    [InlineData("\"sendPromptCacheKey\": true,", true)]
+    [InlineData("\"sendPromptCacheKey\": false,", false)]
+    public async Task ProviderSendPromptCacheKeyIsInherited(string setting, bool expected)
+    {
+        using var directory = new TemporaryDirectory();
+        var modelsPath = Path.Combine(directory.Path, "models.json");
+        var json = $$"""
+            [{
+              "provider": "Proxy",
+              "api": "openai-responses",
+              {{setting}}
+              "models": [
+                { "name": "model-a", "maxContextTokens": 100000 },
+                { "name": "model-b", "maxContextTokens": 100000 }
+              ]
+            }]
+            """;
+        await File.WriteAllTextAsync(modelsPath, json);
+
+        var models = await new FileModelCatalog(directory.Path).LoadAsync();
+
+        Assert.Equal(2, models.Count);
+        Assert.All(models, model => Assert.Equal(expected, model.SendPromptCacheKey));
+        Assert.Equal(json, await File.ReadAllTextAsync(modelsPath));
     }
 
     private sealed class TemporaryDirectory : IDisposable

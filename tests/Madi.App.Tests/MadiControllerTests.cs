@@ -765,6 +765,86 @@ public sealed class MadiControllerTests
         Assert.Contains(store.Sessions, item => item.Id == session.Id);
     }
 
+    [Fact]
+    public async Task StartupReplacesMissingModelWithinProviderAndPersistsNotification()
+    {
+        var session = Session("old", "대화", null, @"C:\work", DateTimeOffset.UtcNow);
+        session.Model = new ModelOptions("removed", ReasoningEffort.High, "test");
+        session.Conversation.Add(new UserMessage("existing conversation"));
+        var store = new RecordingStore { Current = new CurrentConversation(null, session) };
+        var controller = CreateController(store: store);
+
+        await controller.InitializeAsync();
+
+        Assert.Equal("test/first", controller.State.Model.QualifiedName);
+        Assert.Equal(ReasoningEffort.High, controller.State.Model.ReasoningEffort);
+        Assert.Equal(controller.State.Model, store.LastSavedSession?.Model);
+        Assert.Single(session.Conversation);
+        Assert.Contains("test/removed", controller.InitializationMessage!.Text);
+        Assert.Contains("test/first", controller.InitializationMessage.Text);
+    }
+
+    [Fact]
+    public async Task OpeningSessionReplacesMissingModelAndNotifiesAfterConversationLoaded()
+    {
+        var session = Session("old", "대화", null, @"C:\work", DateTimeOffset.UtcNow);
+        session.Model = new ModelOptions("removed", Provider: "test");
+        var store = new RecordingStore();
+        store.Sessions.Add(session);
+        var controller = CreateController(store: store);
+
+        var events = await CollectAsync(controller.ExecuteAsync(new ActivateSessionAction(session.Id)));
+
+        Assert.Equal("test/first", controller.State.Model.QualifiedName);
+        var notification = Assert.Single(events.OfType<AppMessage>());
+        Assert.Contains("자동 선택", notification.Text);
+        Assert.True(events.FindIndex(item => item is AppConversationLoaded) < events.IndexOf(notification));
+        Assert.Contains(events, item => item is AppTurnCompleted { Succeeded: true });
+        Assert.Equal("first", store.LastSavedSession?.Model.Model);
+
+        var reopened = await CollectAsync(controller.ExecuteAsync(new ActivateSessionAction(session.Id)));
+        Assert.DoesNotContain(reopened.OfType<AppMessage>(), item => item.Text.Contains("자동 선택"));
+    }
+
+    [Fact]
+    public async Task MissingProviderFailsSessionOpenWithoutChangingCurrentSession()
+    {
+        var current = Session("current", "현재", null, @"C:\work", DateTimeOffset.UtcNow);
+        var missing = Session("missing", "이전", null, @"C:\work", DateTimeOffset.UtcNow);
+        missing.Model = new ModelOptions("first", Provider: "removed-provider");
+        var store = new RecordingStore { Current = new CurrentConversation(null, current) };
+        store.Sessions.Add(missing);
+        var controller = CreateController(store: store);
+        await controller.InitializeAsync();
+        var originalModel = controller.State.Model;
+
+        var events = await CollectAsync(controller.ExecuteAsync(new ActivateSessionAction(missing.Id)));
+
+        Assert.Equal(current.Id, controller.State.Session?.Id);
+        Assert.Equal(originalModel, controller.State.Model);
+        Assert.Equal(current.Id, store.Current?.Session.Id);
+        Assert.Contains(events, item => item is AppMessage { Kind: AppMessageKind.Error } message
+            && message.Text.Contains("removed-provider"));
+        Assert.Contains(events, item => item is AppTurnCompleted { Succeeded: false });
+        Assert.DoesNotContain(events, item => item is AppConversationLoaded);
+    }
+
+    [Fact]
+    public async Task MissingProviderFailsStartupWithReason()
+    {
+        var session = Session("old", "대화", null, @"C:\work", DateTimeOffset.UtcNow);
+        session.Model = new ModelOptions("first", Provider: "removed-provider");
+        var store = new RecordingStore { Current = new CurrentConversation(null, session) };
+        var controller = CreateController(store: store);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => controller.InitializeAsync());
+
+        Assert.Contains("removed-provider", exception.Message);
+        Assert.Null(controller.State.Session);
+        Assert.Null(controller.InitializationMessage);
+        Assert.Equal("removed-provider", session.Model.Provider);
+    }
+
     private static Session Session(
         string id,
         string title,
