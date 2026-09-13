@@ -21,4 +21,5 @@
     <ProjectReference Include="..\..\src\Madi.GUI.Presentation\Madi.GUI.Presentation.csproj" />
   </ItemGroup>
 
+  <ItemGroup><Compile Include="../TestSupport/WorkspaceHarness.cs" Link="WorkspaceHarness.cs" /></ItemGroup>
 </Project>

@@ -4,7 +4,7 @@ using Madi.Core;
 
 namespace Madi.Runtime.Persistence;
 
-public sealed class FileWorkSessionStore : IWorkSessionStore
+public sealed partial class FileWorkSessionStore : IWorkSessionStore
 {
     private static readonly SemaphoreSlim FileLock = new(1, 1);
     private static readonly UTF8Encoding Utf8WithoutBom = new(false);
@@ -524,6 +524,7 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
         CancellationToken cancellationToken)
     {
         ValidateId(sessionId, nameof(sessionId));
+        await RecoverTurnUnlockedAsync(sessionId);
         var metadataPath = GetSessionMetadataPath(sessionId);
         if (!File.Exists(metadataPath))
         {
@@ -570,10 +571,9 @@ public sealed class FileWorkSessionStore : IWorkSessionStore
                     ?? throw new InvalidDataException(
                         $"Conversation item in '{conversationPath}' is null.");
             }
-            catch (JsonException) when (nextLine is null)
+            catch (JsonException exception)
             {
-                // A process may have stopped while appending the last record.
-                break;
+                throw new InvalidDataException($"Conversation in session '{session.Id}' is damaged; recovery is required.", exception);
             }
 
             if (item.Sequence != session.Conversation.Count)

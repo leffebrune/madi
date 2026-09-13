@@ -6,7 +6,7 @@ using Madi.Core;
 
 namespace Madi.GUI.Presentation;
 
-public sealed class MainViewModel : ObservableObject, IDisposable
+public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly MadiController _controller;
     private readonly IUiDispatcher _dispatcher;
@@ -138,7 +138,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public string CurrentWorkPrompt
     {
-        get => _currentWorkPrompt;
+        get => _workEditor?.Baseline ?? _currentWorkPrompt;
         private set
         {
             if (SetProperty(ref _currentWorkPrompt, value))
@@ -150,9 +150,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public string WorkPromptDraft
     {
-        get => _workPromptDraft;
+        get => _workEditor?.Draft ?? _workPromptDraft;
         set
         {
+            if (_workEditor is not null) { _workEditor.Draft = value; return; }
             if (SetProperty(ref _workPromptDraft, value))
             {
                 OnPropertyChanged(nameof(CanSaveWorkPrompt));
@@ -161,7 +162,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     }
 
     public bool HasCurrentWork => CurrentWorkId is not null;
-    public bool CanSaveWorkPrompt => HasCurrentWork && CanInteract && IsWorkPromptDirty;
+    public bool CanSaveWorkPrompt => HasCurrentWork && (_tab is null ? CanInteract : CanNavigate) && IsWorkPromptDirty;
 
     private bool IsWorkPromptDirty =>
         !string.Equals(WorkPromptDraft, CurrentWorkPrompt, StringComparison.Ordinal);
@@ -277,6 +278,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public Task SaveWorkPromptAsync()
     {
+        if (_tab is not null) return SaveWorkspaceWorkAsync();
         if (!CanSaveWorkPrompt)
         {
             return Task.CompletedTask;
@@ -321,10 +323,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public void ClearError() => ErrorText = null;
 
-    public void Cancel() => _operationCancellation?.Cancel();
+    public void Cancel() { if (Runtime is not null) Runtime.Cancel(); else _operationCancellation?.Cancel(); }
 
     public void Dispose()
     {
+        _disposed = true;
+        if (Runtime is not null) Runtime.Changed -= OnRuntimeChanged;
+        if (_workEditor is not null) _workEditor.PropertyChanged -= OnWorkEditorChanged;
         _operationCancellation?.Cancel();
         _operationCancellation?.Dispose();
         _operationCancellation = null;
@@ -332,6 +337,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private async Task ExecuteAsync(AppAction action)
     {
+        if (_tab is not null) { await ExecuteWorkspaceAsync(action); return; }
         if (_operationCancellation is not null)
         {
             return;
@@ -400,7 +406,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 _pendingUserTimelineItem.SetConversationInteraction(CanInteract);
                 Timeline.Add(_pendingUserTimelineItem);
                 UsageText = "응답 사용량 계산 중…";
-                Draft = string.Empty;
+                if (_tab is null || Draft.Trim() == user.Text) Draft = string.Empty;
                 Suggestions.Clear();
                 break;
             case AppTurnCompleted completed:
@@ -539,9 +545,16 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         var nextWorkId = state.Work?.Id;
         var workChanged = !string.Equals(CurrentWorkId, nextWorkId, StringComparison.Ordinal);
+        if (_tab is not null && workChanged)
+        {
+            if (_workEditor is not null) _workEditor.PropertyChanged -= OnWorkEditorChanged;
+            _workEditor = state.Work is { } work ? _tab.Editor(work) : null;
+            if (_workEditor is not null) _workEditor.PropertyChanged += OnWorkEditorChanged;
+        }
         CurrentWorkId = nextWorkId;
+        var wasDirty = IsWorkPromptDirty;
         CurrentWorkPrompt = state.Work?.Prompt ?? string.Empty;
-        if (workChanged || !IsWorkPromptDirty)
+        if (_workEditor is null && (workChanged || !wasDirty))
         {
             WorkPromptDraft = CurrentWorkPrompt;
         }
@@ -565,10 +578,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         LegacyItemCount = navigation.LegacyItemCount;
         OnPropertyChanged(nameof(LegacyItemCount));
-        NavigationItems.Clear();
+        var desired = new List<NavigationItemViewModel>();
         foreach (var work in navigation.Works)
         {
-            NavigationItems.Add(new NavigationItemViewModel(
+            desired.Add(new NavigationItemViewModel(
                 work.Title,
                 SessionId: null,
                 work.Id,
@@ -576,7 +589,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 IsHeader: true));
             foreach (var session in work.Sessions)
             {
-                NavigationItems.Add(new NavigationItemViewModel(
+                desired.Add(new NavigationItemViewModel(
                     session.Title,
                     session.Id,
                     work.Id,
@@ -588,7 +601,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         if (navigation.StandaloneSessions.Count > 0)
         {
-            NavigationItems.Add(new NavigationItemViewModel(
+            desired.Add(new NavigationItemViewModel(
                 "독립 대화",
                 SessionId: null,
                 WorkId: null,
@@ -596,7 +609,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 IsHeader: true));
             foreach (var session in navigation.StandaloneSessions)
             {
-                NavigationItems.Add(new NavigationItemViewModel(
+                desired.Add(new NavigationItemViewModel(
                     session.Title,
                     session.Id,
                     WorkId: null,
@@ -605,6 +618,29 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                     string.Equals(session.Id, _controller.State.Session?.Id, StringComparison.Ordinal)));
             }
         }
+        for (var i = 0; i < desired.Count; i++)
+        {
+            var entry = desired[i];
+            if (_tab is not null && entry.SessionId is { } id)
+            {
+                var owner = _tab.Workspace.Ownership.Owner(id);
+                var runtime = _tab.Workspace.FindRuntime(id);
+                var status = owner is { } used && used != _tab.Tab.Id ? _tab.Workspace.GetTab(used).Name + " 사용 중" : "";
+                if (runtime?.IsRunning == true) status += " ⟳ 실행/저장";
+                if (runtime?.HasUnseenResult == true) status += " ● 미확인";
+                entry = entry with { Status = status.Trim() };
+            }
+            var existing = NavigationItems.FirstOrDefault(x => x.SessionId == entry.SessionId && x.WorkId == entry.WorkId && x.IsHeader == entry.IsHeader);
+            if (existing is not null)
+            {
+                var index = NavigationItems.IndexOf(existing);
+                if (index != i) NavigationItems.Move(index, i);
+                if (existing != entry) NavigationItems[i] = entry;
+            }
+            else NavigationItems.Insert(i, entry);
+        }
+        while (NavigationItems.Count > desired.Count) NavigationItems.RemoveAt(NavigationItems.Count - 1);
+        OnPropertyChanged(nameof(SelectedNavigationItem));
     }
 
     private void ApplyConversation(ConversationSnapshot conversation)

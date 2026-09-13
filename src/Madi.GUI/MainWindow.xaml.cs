@@ -12,6 +12,8 @@ public sealed partial class MainWindow : Window
 
     private nint _largeIcon;
     private nint _smallIcon;
+    private bool _closeApproved;
+    private bool _closeInProgress;
 
     public MainWindow()
     {
@@ -45,12 +47,22 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OnClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    private async void OnClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
+        if (_closeApproved) return;
+        args.Cancel = true;
+        if (_closeInProgress) return;
+        _closeInProgress = true;
+        try
+        {
         if (RootFrame.Content is MainPage page)
         {
-            page.CancelAndDispose();
+            if (!await page.TryCloseAsync()) return;
         }
+        _closeApproved = true;
+        Close();
+        }
+        finally { _closeInProgress = false; }
     }
 
     private void OnClosed(object sender, WindowEventArgs args)

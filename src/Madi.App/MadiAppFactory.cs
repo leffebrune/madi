@@ -10,7 +10,10 @@ namespace Madi.App;
 
 public sealed record MadiAppHost(
     MadiController Controller,
-    UtilityInstaller UtilityInstaller);
+    UtilityInstaller UtilityInstaller)
+{
+    public WorkspaceCoordinator Workspace { get; } = new(Controller);
+}
 
 public static class MadiAppFactory
 {

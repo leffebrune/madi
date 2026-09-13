@@ -308,9 +308,11 @@ public sealed record NavigationItemViewModel(
     string? WorkId,
     int Indent,
     bool IsHeader,
-    bool IsActive = false)
+    bool IsActive = false,
+    string Status = "")
 {
     public bool HasMenu => SessionId is not null || (IsHeader && WorkId is not null);
+    public string DisplayTitle => Title + (Status.Length > 0 ? $" · {Status}" : "");
 }
 
 public sealed record SuggestionItemViewModel(string CompletionText, string DisplayText);
