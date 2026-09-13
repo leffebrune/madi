@@ -1,949 +1,228 @@
 using System.Collections.ObjectModel;
-using System.Collections.Specialized;
-using System.ComponentModel;
 using Madi.App;
 using Madi.GUI.Presentation;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
-using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage.Pickers;
-using Windows.System;
 
 namespace Madi.GUI;
 
 public sealed partial class MainPage : Page
 {
-    private enum TimelineScrollMode
-    {
-        FollowLatest,
-        Free,
-    }
-
-    private const double TimelineBottomTolerance = 0.5;
     private readonly GuiSettingsStore _settings = new();
     private readonly ObservableCollection<string> _recentWorkspaces = [];
-    private readonly HashSet<TimelineItemViewModel> _observedTimelineItems = [];
-    private MainViewModel? _viewModel;
+    private readonly Dictionary<TabId, (WorkspaceTabViewModel View, WorkspaceTabPage Page, TabViewItem Item)> _views = [];
+    private MadiAppHost? _host;
     private CancellationTokenSource? _workspaceCancellation;
-    private Control? _systemPromptPreviousFocus;
-    private TimelineScrollMode _timelineScrollMode = TimelineScrollMode.FollowLatest;
-    private bool _navigationDeleteInProgress;
-    private bool _timelineScrollRequested;
-    private bool _timelineScrollScheduled;
-    private int _timelineScrollGeneration;
+    private Task? _utilityTask;
+    private bool _synchronizing;
+    private bool _closing;
 
     public MainPage()
     {
         InitializeComponent();
-        TimelineScroller.AddHandler(
-            PointerWheelChangedEvent,
-            new PointerEventHandler(OnTimelinePointerWheelChanged),
-            handledEventsToo: true);
         RecentWorkspaceList.ItemsSource = _recentWorkspaces;
         Loaded += OnLoaded;
     }
 
-    public void CancelAndDispose()
-    {
-        DetachTimeline();
-        CancelTimelineScroll();
-        _workspaceCancellation?.Cancel();
-        _workspaceCancellation?.Dispose();
-        _workspaceCancellation = null;
-        if (_viewModel is not null)
-        {
-            _viewModel.ExitRequested -= OnExitRequested;
-            _viewModel.Cancel();
-            _viewModel.Dispose();
-            _viewModel = null;
-        }
-    }
-
-    private async void OnLoaded(object sender, RoutedEventArgs e)
+    private async void OnLoaded(object sender, RoutedEventArgs args)
     {
         Loaded -= OnLoaded;
         await LoadRecentWorkspacesAsync();
     }
-
     private async Task LoadRecentWorkspacesAsync()
     {
         try
         {
             _recentWorkspaces.Clear();
-            foreach (var path in await _settings.LoadRecentWorkspacesAsync())
-            {
-                _recentWorkspaces.Add(path);
-            }
-            if (_recentWorkspaces.Count > 0)
-            {
-                RecentWorkspaceList.SelectedIndex = 0;
-            }
+            foreach (var path in await _settings.LoadRecentWorkspacesAsync()) _recentWorkspaces.Add(path);
+            if (_recentWorkspaces.Count > 0) RecentWorkspaceList.SelectedIndex = 0;
         }
-        catch (Exception exception)
-        {
-            ShowWorkspaceError($"최근 작업공간을 불러오지 못했습니다: {exception.Message}");
-        }
+        catch (Exception error) { ShowError(error.Message); }
     }
-
-    private async void OnBrowseWorkspace(object sender, RoutedEventArgs e)
+    private async void OnBrowseWorkspace(object sender, RoutedEventArgs args)
     {
         try
         {
-            var picker = new FolderPicker();
-            picker.FileTypeFilter.Add("*");
+            var picker = new FolderPicker(); picker.FileTypeFilter.Add("*");
             WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
             var folder = await picker.PickSingleFolderAsync();
-            if (folder is not null)
-            {
-                await OpenWorkspaceAsync(folder.Path);
-            }
+            if (folder is not null) await OpenWorkspaceAsync(folder.Path);
         }
-        catch (Exception exception)
-        {
-            ShowWorkspaceError($"폴더를 열지 못했습니다: {exception.Message}");
-        }
+        catch (Exception error) { ShowError(error.Message); }
     }
-
-    private async void OnOpenRecentWorkspace(object sender, RoutedEventArgs e)
+    private async void OnOpenRecentWorkspace(object sender, RoutedEventArgs args)
     {
-        if (RecentWorkspaceList.SelectedItem is string path)
-        {
-            await OpenWorkspaceAsync(path);
-        }
+        if (RecentWorkspaceList.SelectedItem is string path) await OpenWorkspaceAsync(path);
     }
-
-    private async void OnRecentWorkspaceDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    private async void OnRecentWorkspaceDoubleTapped(object sender, DoubleTappedRoutedEventArgs args)
     {
-        if (RecentWorkspaceList.SelectedItem is string path)
-        {
-            await OpenWorkspaceAsync(path);
-        }
+        if (RecentWorkspaceList.SelectedItem is string path) await OpenWorkspaceAsync(path);
     }
-
     private async Task OpenWorkspaceAsync(string path)
     {
-        path = Path.GetFullPath(path);
-        if (!Directory.Exists(path))
-        {
-            ShowWorkspaceError("선택한 폴더가 존재하지 않습니다.");
-            return;
-        }
-
-        WorkspaceError.IsOpen = false;
         WorkspacePanel.IsHitTestVisible = false;
         try
         {
-            await _settings.AddRecentWorkspaceAsync(path);
+            if (!Directory.Exists(path)) throw new InvalidOperationException("선택한 폴더가 존재하지 않습니다.");
             var host = await MadiAppFactory.CreateAsync(workingDirectory: path);
-            _workspaceCancellation?.Cancel();
-            _workspaceCancellation?.Dispose();
+            await host.Workspace.InitializeAsync();
+            _host = host;
             _workspaceCancellation = new CancellationTokenSource();
-            if (_viewModel is not null)
-            {
-                DetachTimeline();
-                _viewModel.ExitRequested -= OnExitRequested;
-                _viewModel.Dispose();
-            }
-            _viewModel = new MainViewModel(
-                host.Controller,
-                new DispatcherQueueAdapter(DispatcherQueue));
-            AttachTimeline(_viewModel);
-            _viewModel.ExitRequested += OnExitRequested;
-            DataContext = _viewModel;
-            await _viewModel.InitializeAsync(_workspaceCancellation.Token);
-
+            await _settings.AddRecentWorkspaceAsync(path);
+            host.Workspace.Changed += OnWorkspaceChanged;
+            await SynchronizeTabsAsync();
             WorkspacePanel.Visibility = Visibility.Collapsed;
-            Shell.Visibility = Visibility.Visible;
-            LegacyInfoBar.IsOpen = _viewModel.LegacyItemCount > 0;
-            FollowLatestAndScroll();
-            PromptBox.Focus(FocusState.Programmatic);
-            _ = RunUtilityInstallerAsync(
-                host.UtilityInstaller,
-                _viewModel,
-                _workspaceCancellation.Token);
+            WorkspaceShell.Visibility = Visibility.Visible;
+            _utilityTask = RunUtilityInstallerAsync(host, _workspaceCancellation.Token);
         }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception exception)
-        {
-            ShowWorkspaceError($"작업공간을 초기화하지 못했습니다: {exception.Message}");
-        }
-        finally
-        {
-            WorkspacePanel.IsHitTestVisible = true;
-        }
+        catch (Exception error) { ShowError(error.Message); }
+        finally { WorkspacePanel.IsHitTestVisible = true; }
     }
-
-    private static async Task RunUtilityInstallerAsync(
-        UtilityInstaller installer,
-        MainViewModel viewModel,
-        CancellationToken cancellationToken)
+    private async Task RunUtilityInstallerAsync(MadiAppHost host, CancellationToken token)
     {
         try
         {
-            await foreach (var item in installer.EnsureAsync(cancellationToken))
-            {
-                await viewModel.ApplyExternalEventAsync(item);
-            }
+            await foreach (var item in host.UtilityInstaller.EnsureAsync(token))
+                foreach (var view in _views.Values.ToArray())
+                    if (view.View.Current is { } current) await current.ApplyExternalEventAsync(item);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-        catch (Exception exception)
-        {
-            await viewModel.ApplyExternalEventAsync(new AppMessage(
-                $"필수 유틸리티를 준비하지 못했습니다: {exception.Message}",
-                AppMessageKind.Warning));
-        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception error) { ShowError($"유틸리티 준비 실패: {error.Message}"); }
     }
-
-    private void OnTimelinePointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    private async void OnWorkspaceChanged(object? sender, EventArgs args)
     {
-        if (_timelineScrollMode == TimelineScrollMode.FollowLatest
-            && e.GetCurrentPoint(TimelineScroller).Properties.MouseWheelDelta > 0)
+        if (!DispatcherQueue.HasThreadAccess)
         {
-            SetTimelineScrollMode(TimelineScrollMode.Free);
+            DispatcherQueue.TryEnqueue(() => OnWorkspaceChanged(sender, args)); return;
         }
+        try { await SynchronizeTabsAsync(); }
+        catch (Exception error) { ShowError(error.Message); }
     }
-
-    private void OnTimelineViewChanged(object sender, ScrollViewerViewChangedEventArgs e)
+    private async Task SynchronizeTabsAsync()
     {
-        if (_timelineScrollMode == TimelineScrollMode.Free
-            && TimelineScroller.ScrollableHeight - TimelineScroller.VerticalOffset
-                <= TimelineBottomTolerance)
-        {
-            SetTimelineScrollMode(TimelineScrollMode.FollowLatest);
-        }
-    }
-
-    private void OnTimelinePreviewKeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (e.Key == VirtualKey.End)
-        {
-            e.Handled = true;
-            FollowLatestAndScroll();
-            return;
-        }
-
-        if (_timelineScrollMode == TimelineScrollMode.FollowLatest
-            && e.Key is VirtualKey.Up or VirtualKey.PageUp or VirtualKey.Home)
-        {
-            SetTimelineScrollMode(TimelineScrollMode.Free);
-        }
-    }
-
-    private void OnGoLatest(object sender, RoutedEventArgs e) => FollowLatestAndScroll();
-
-    private void FollowLatestAndScroll()
-    {
-        SetTimelineScrollMode(TimelineScrollMode.FollowLatest);
-        RequestTimelineScrollToEnd(requireAgentBusy: false);
-    }
-
-    private void SetTimelineScrollMode(TimelineScrollMode mode)
-    {
-        if (_timelineScrollMode == mode)
-        {
-            LatestButton.Visibility = mode == TimelineScrollMode.Free
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-            return;
-        }
-
-        _timelineScrollMode = mode;
-        if (mode == TimelineScrollMode.Free)
-        {
-            CancelTimelineScroll();
-        }
-        LatestButton.Visibility = mode == TimelineScrollMode.Free
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-    }
-
-    private void AttachTimeline(MainViewModel viewModel)
-    {
-        viewModel.Timeline.CollectionChanged += OnTimelineCollectionChanged;
-        foreach (var item in viewModel.Timeline)
-        {
-            AttachTimelineItem(item);
-        }
-    }
-
-    private void DetachTimeline()
-    {
-        if (_viewModel is not null)
-        {
-            _viewModel.Timeline.CollectionChanged -= OnTimelineCollectionChanged;
-        }
-        foreach (var item in _observedTimelineItems)
-        {
-            item.PropertyChanged -= OnTimelineItemPropertyChanged;
-        }
-        _observedTimelineItems.Clear();
-    }
-
-    private void OnTimelineCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
-    {
-        if (e.OldItems is not null)
-        {
-            foreach (var item in e.OldItems.OfType<TimelineItemViewModel>())
-            {
-                DetachTimelineItem(item);
-            }
-        }
-        if (e.NewItems is not null)
-        {
-            foreach (var item in e.NewItems.OfType<TimelineItemViewModel>())
-            {
-                AttachTimelineItem(item);
-            }
-        }
-        if (e.Action == NotifyCollectionChangedAction.Reset && _viewModel is not null)
-        {
-            foreach (var item in _observedTimelineItems)
-            {
-                item.PropertyChanged -= OnTimelineItemPropertyChanged;
-            }
-            _observedTimelineItems.Clear();
-            foreach (var item in _viewModel.Timeline)
-            {
-                AttachTimelineItem(item);
-            }
-        }
-
-        RequestTimelineScrollToEnd(requireAgentBusy: true);
-    }
-
-    private void AttachTimelineItem(TimelineItemViewModel item)
-    {
-        if (_observedTimelineItems.Add(item))
-        {
-            item.PropertyChanged += OnTimelineItemPropertyChanged;
-        }
-    }
-
-    private void DetachTimelineItem(TimelineItemViewModel item)
-    {
-        if (_observedTimelineItems.Remove(item))
-        {
-            item.PropertyChanged -= OnTimelineItemPropertyChanged;
-        }
-    }
-
-    private void OnTimelineItemPropertyChanged(object? sender, PropertyChangedEventArgs e) =>
-        RequestTimelineScrollToEnd(requireAgentBusy: true);
-
-    private void RequestTimelineScrollToEnd(bool requireAgentBusy)
-    {
-        if (_timelineScrollMode != TimelineScrollMode.FollowLatest
-            || (requireAgentBusy && _viewModel?.IsBusy != true))
-        {
-            return;
-        }
-
-        _timelineScrollRequested = true;
-        if (_timelineScrollScheduled)
-        {
-            return;
-        }
-
-        _timelineScrollScheduled = true;
-        var generation = _timelineScrollGeneration;
-        if (!DispatcherQueue.TryEnqueue(
-                Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
-                () => ApplyTimelineScrollToEnd(generation)))
-        {
-            _timelineScrollScheduled = false;
-            _timelineScrollRequested = false;
-        }
-    }
-
-    private void ApplyTimelineScrollToEnd(int generation)
-    {
-        if (generation != _timelineScrollGeneration)
-        {
-            return;
-        }
-
-        _timelineScrollScheduled = false;
-        if (_timelineScrollMode != TimelineScrollMode.FollowLatest
-            || !_timelineScrollRequested)
-        {
-            return;
-        }
-
-        _timelineScrollRequested = false;
-        TimelineScroller.UpdateLayout();
-        var targetOffset = TimelineScroller.ScrollableHeight;
-        if (targetOffset - TimelineScroller.VerticalOffset > TimelineBottomTolerance)
-        {
-            TimelineScroller.ChangeView(
-                horizontalOffset: null,
-                verticalOffset: targetOffset,
-                zoomFactor: null,
-                disableAnimation: true);
-        }
-    }
-
-    private void CancelTimelineScroll()
-    {
-        _timelineScrollGeneration++;
-        _timelineScrollRequested = false;
-        _timelineScrollScheduled = false;
-    }
-
-    private void OnConversationItemMenuClick(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel?.CanInteract != true
-            || sender is not Button
-            {
-                DataContext: TimelineItemViewModel { CanDeleteFromHere: true } item,
-            } button)
-        {
-            return;
-        }
-
-        var deleteItem = new MenuFlyoutItem
-        {
-            Text = "여기서부터 삭제",
-            Icon = new FontIcon { Glyph = "\uE74D" },
-            Tag = item,
-        };
-        deleteItem.Click += OnDeleteConversationFrom;
-
-        var flyout = new MenuFlyout();
-        flyout.Items.Add(deleteItem);
-        flyout.ShowAt(button);
-    }
-
-    private async void OnDeleteConversationFrom(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel?.CanInteract != true
-            || sender is not MenuFlyoutItem
-            {
-                Tag: TimelineItemViewModel
-                {
-                    CanDeleteFromHere: true,
-                    SessionId: { } sessionId,
-                    ConversationIndex: { } conversationIndex,
-                },
-            })
-        {
-            return;
-        }
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = "여기서부터 삭제할까요?",
-            Content = new TextBlock
-            {
-                Text = "선택한 메시지와 그 이후의 모든 대화가 영구적으로 삭제됩니다.",
-                TextWrapping = TextWrapping.Wrap,
-            },
-            PrimaryButtonText = "삭제",
-            CloseButtonText = "취소",
-            DefaultButton = ContentDialogButton.Close,
-        };
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        await _viewModel.DeleteConversationFromAsync(sessionId, conversationIndex);
-        PromptBox.Focus(FocusState.Programmatic);
-    }
-
-    private void OnCopyAssistantMarkdown(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button
-            {
-                DataContext: TimelineItemViewModel
-                {
-                    Kind: TimelineItemKind.Assistant,
-                    Text: var markdown,
-                },
-            })
-        {
-            return;
-        }
-
-        var package = new DataPackage();
-        package.SetText(markdown);
-        Clipboard.SetContent(package);
-    }
-
-    private void OnToggleActivityDetails(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button
-            {
-                DataContext: TimelineItemViewModel { IsActivity: true } activity,
-            })
-        {
-            activity.IsActivityExpanded = !activity.IsActivityExpanded;
-        }
-    }
-
-    private async void OnNavigationItemClick(object sender, ItemClickEventArgs e)
-    {
-        if (_viewModel is not null
-            && e.ClickedItem is NavigationItemViewModel { IsHeader: false, SessionId: { } id })
-        {
-            await _viewModel.ActivateSessionAsync(id);
-            FollowLatestAndScroll();
-
-            // Activation rebuilds NavigationItems, invalidating the clicked item/container.
-            var selectedSession = _viewModel.NavigationItems.FirstOrDefault(item => item.SessionId == id);
-            NavigationList.SelectedItem = selectedSession;
-            if (selectedSession is not null)
-            {
-                NavigationList.ScrollIntoView(selectedSession);
-                NavigationList.UpdateLayout();
-                if (NavigationList.ContainerFromItem(selectedSession) is ListViewItem container)
-                {
-                    container.Focus(FocusState.Programmatic);
-                }
-                else
-                {
-                    NavigationList.Focus(FocusState.Programmatic);
-                }
-            }
-        }
-    }
-
-    private void OnNavigationMenuClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button { DataContext: NavigationItemViewModel item } button)
-        {
-            return;
-        }
-
-        var isWork = item is { IsHeader: true, WorkId: not null };
-        if (!isWork && item.SessionId is null)
-        {
-            return;
-        }
-
-        var deleteItem = new MenuFlyoutItem
-        {
-            Text = isWork ? "Work 삭제" : "대화 삭제",
-            Icon = new FontIcon { Glyph = "\uE74D" },
-            Tag = item,
-        };
-        deleteItem.Click += isWork ? OnDeleteWork : OnDeleteSession;
-
-        var flyout = new MenuFlyout();
-        flyout.Items.Add(deleteItem);
-        flyout.ShowAt(button);
-    }
-
-    private async void OnNavigationPreviewKeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (e.Key != VirtualKey.Delete
-            || _viewModel is not { CanInteract: true }
-            || NavigationList.SelectedItem is not NavigationItemViewModel { HasMenu: true } item)
-        {
-            return;
-        }
-
-        // Keep this shortcut scoped to the list, not text editing in the prompt.
-        e.Handled = true;
-        await ConfirmAndDeleteNavigationItemAsync(item);
-    }
-
-    private async void OnDeleteSession(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuFlyoutItem
-            {
-                Tag: NavigationItemViewModel { SessionId: not null } session,
-            })
-        {
-            await ConfirmAndDeleteNavigationItemAsync(session);
-        }
-    }
-
-    private async void OnDeleteWork(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuFlyoutItem
-            {
-                Tag: NavigationItemViewModel { IsHeader: true, WorkId: not null } work,
-            })
-        {
-            await ConfirmAndDeleteNavigationItemAsync(work);
-        }
-    }
-
-    private async Task ConfirmAndDeleteNavigationItemAsync(NavigationItemViewModel item)
-    {
-        if (_navigationDeleteInProgress
-            || _viewModel is not { CanInteract: true } viewModel
-            || !item.HasMenu)
-        {
-            return;
-        }
-
-        _navigationDeleteInProgress = true;
+        if (_host is null || _synchronizing) return;
+        _synchronizing = true;
         try
         {
-            var isWork = item is { IsHeader: true, WorkId: not null };
-            var dialog = new ContentDialog
+            var workspace = _host.Workspace;
+            foreach (var tab in workspace.Tabs.Where(t => t.Selected is not null))
             {
-                XamlRoot = XamlRoot,
-                Title = isWork ? "Work를 삭제할까요?" : "대화를 삭제할까요?",
-                Content = new TextBlock
+                if (!_views.TryGetValue(tab.Id, out var existing))
                 {
-                    Text = isWork
-                        ? $"‘{item.Title}’ Work와 여기에 포함된 모든 대화가 영구적으로 삭제됩니다."
-                        : $"‘{item.Title}’ 대화와 모든 기록이 영구적으로 삭제됩니다.",
-                    TextWrapping = TextWrapping.Wrap,
-                },
-                PrimaryButtonText = "삭제",
-                CloseButtonText = "취소",
-                DefaultButton = ContentDialogButton.Close,
-            };
-
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-            {
-                return;
+                    var view = new WorkspaceTabViewModel(workspace, tab, new DispatcherQueueAdapter(DispatcherQueue));
+                    await view.SynchronizeAsync();
+                    var page = new WorkspaceTabPage(); page.Bind(view);
+                    page.ChangeWorkspaceRequested += OnChangeWorkspace;
+                    page.OpenInNewTabRequested += OnOpenInNewTab;
+                    var item = new TabViewItem { Header = view.Header, Content = page, Tag = tab.Id,
+                        HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
+                    existing = (view, page, item);
+                    _views.Add(tab.Id, existing); Tabs.TabItems.Add(item);
+                }
+                existing.Item.Header = existing.View.Header;
+                existing.Item.IsClosable = !tab.IsClosing;
+                existing.Page.IsEnabled = !tab.IsClosing;
             }
-
-            if (isWork)
+            foreach (var id in _views.Keys.Where(id => !workspace.Tabs.Any(t => t.Id == id)).ToArray())
             {
-                await viewModel.DeleteWorkAsync(item.WorkId!);
+                var entry = _views[id]; entry.Page.Detach(); entry.View.Dispose();
+                entry.Page.ChangeWorkspaceRequested -= OnChangeWorkspace;
+                entry.Page.OpenInNewTabRequested -= OnOpenInNewTab;
+                Tabs.TabItems.Remove(entry.Item); _views.Remove(id);
             }
-            else if (item.SessionId is { } sessionId)
-            {
-                await viewModel.DeleteSessionAsync(sessionId);
-            }
+            if (workspace.ActiveTab is { } active && _views.TryGetValue(active, out var selected)) Tabs.SelectedItem = selected.Item;
         }
-        finally
-        {
-            _navigationDeleteInProgress = false;
-        }
+        finally { _synchronizing = false; }
     }
-
-    private void OnNewSessionMenu(object sender, RoutedEventArgs e)
+    private async void OnAddTab(TabView sender, object args)
     {
-        if (_viewModel is null || sender is not Button button)
-        {
-            return;
-        }
-
-        var menu = new MenuFlyout();
-        if (_viewModel.HasCurrentWork)
-        {
-            var currentWorkItem = new MenuFlyoutItem
-            {
-                Text = "현재 Work에 새 대화",
-            };
-            currentWorkItem.Click += OnNewSessionInCurrentWork;
-            menu.Items.Add(currentWorkItem);
-        }
-
-        var standaloneItem = new MenuFlyoutItem
-        {
-            Text = "독립 대화",
-        };
-        standaloneItem.Click += OnNewStandaloneSession;
-        menu.Items.Add(standaloneItem);
-        menu.ShowAt(button);
+        if (_closing || _host?.Workspace.ActiveTab is not { } active) return;
+        try { await _host.Workspace.NewTabAsync(active); await SynchronizeTabsAsync(); }
+        catch (Exception error) { ShowError(error.Message); }
     }
-
-    private async void OnNewSessionInCurrentWork(object sender, RoutedEventArgs e)
+    private async void OnOpenInNewTab(object? sender, string session)
     {
-        if (_viewModel?.CurrentWorkId is { } workId)
+        if (_closing || _host?.Workspace.ActiveTab is not { } active) return;
+        try { await _host.Workspace.NewTabAsync(active, session); await SynchronizeTabsAsync(); }
+        catch (SessionInUseException conflict)
         {
-            await _viewModel.CreateSessionAsync(workId);
-            FollowLatestAndScroll();
-            PromptBox.Focus(FocusState.Programmatic);
+            if (_views.GetValueOrDefault(active).View?.Current is { } current) await current.ShowBlockedAsync(conflict);
         }
+        catch (Exception error) { ShowError(error.Message); }
     }
-
-    private async void OnNewStandaloneSession(object sender, RoutedEventArgs e)
+    private async void OnTabSelected(object sender, SelectionChangedEventArgs args)
     {
-        if (_viewModel is not null)
-        {
-            await _viewModel.CreateSessionAsync(workId: null);
-            FollowLatestAndScroll();
-            PromptBox.Focus(FocusState.Programmatic);
-        }
+        if (_synchronizing || _host is null || Tabs.SelectedItem is not TabViewItem { Tag: TabId id }) return;
+        try { await _host.Workspace.ActivateTabAsync(id); }
+        catch (Exception error) { ShowError(error.Message); }
     }
-
-    private async void OnNewWork(object sender, RoutedEventArgs e)
+    private async void OnTabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
     {
-        if (_viewModel is null)
+        if (_closing || _host is null || args.Tab.Tag is not TabId id) return;
+        _closing = true;
+        try
         {
-            return;
+            if (!await ConfirmCloseAsync([id])) return;
+            var workspace = _host.Workspace;
+            var last = workspace.Tabs.Count == 1;
+            // Prepare the replacement first, preserving history and monotonically increasing tab numbers.
+            if (last) await workspace.NewTabAsync(id);
+            await workspace.CloseTabAsync(id);
+            await SynchronizeTabsAsync();
         }
-
-        var input = new TextBox
-        {
-            PlaceholderText = "Work 제목",
-            MinWidth = 320,
-        };
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = "새 Work",
-            Content = input,
-            PrimaryButtonText = "만들기",
-            CloseButtonText = "취소",
-            DefaultButton = ContentDialogButton.Primary,
-        };
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary
-            && !string.IsNullOrWhiteSpace(input.Text))
-        {
-            await _viewModel.CreateWorkAsync(input.Text);
-        }
+        catch (Exception error) { ShowError($"탭을 닫지 못했습니다: {error.Message}"); }
+        finally { _closing = false; }
     }
-
-    private async void OnSaveWorkPrompt(object sender, RoutedEventArgs e)
+    private async Task<bool> ConfirmCloseAsync(IEnumerable<TabId> ids)
     {
-        if (_viewModel is not null)
-        {
-            await _viewModel.SaveWorkPromptAsync();
-        }
+        if (_host is null) return true;
+        var tabs = ids.Select(id => _views.GetValueOrDefault(id).View).Where(v => v is not null).ToArray();
+        var running = tabs.Sum(t => _host.Workspace.RunningCount(t.Tab.Id));
+        var dirty = tabs.Any(t => t.HasUnsavedChanges);
+        if (running == 0 && !dirty) return true;
+        var descriptions = tabs.Select(t => $"{t.Tab.Name}: 실행/저장 {_host.Workspace.RunningCount(t.Tab.Id)}개"
+            + (running > 0 ? " · " + string.Join(", ", _host.Workspace.RunningTitles(t.Tab.Id)) : "")
+            + (t.HasUnsavedChanges ? ", 미전송 초안 또는 미저장 Work 편집 있음" : ""));
+        var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "탭을 닫을까요?",
+            Content = new TextBlock { Text = string.Join("\n", descriptions) + "\n\n"
+                + (dirty ? "미전송 초안과 미저장 Work 편집을 버립니다.\n" : "")
+                + (running > 0 ? "해당 탭의 작업을 중지하고 저장과 정리가 끝날 때까지 기다립니다." : ""), TextWrapping = TextWrapping.Wrap },
+            PrimaryButtonText = running > 0 ? "작업 중지 후 닫기" : "닫기", CloseButtonText = "취소", DefaultButton = ContentDialogButton.Close };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
-
-    private void OnLeftSplitterDragDelta(object sender, DragDeltaEventArgs e) =>
-        ResizePanel(
-            SidebarColumn,
-            SidebarColumn.ActualWidth + e.HorizontalChange,
-            WorkPanelColumn.ActualWidth);
-
-    private void OnRightSplitterDragDelta(object sender, DragDeltaEventArgs e) =>
-        ResizePanel(
-            WorkPanelColumn,
-            WorkPanelColumn.ActualWidth - e.HorizontalChange,
-            SidebarColumn.ActualWidth);
-
-    private void ResizePanel(ColumnDefinition column, double requestedWidth, double oppositeWidth)
+    public async Task<bool> TryCloseAsync()
     {
-        const double splitterWidth = 12;
-        const double minimumConversationWidth = 360;
-
-        var availableWidth = Shell.ActualWidth
-            - oppositeWidth
-            - splitterWidth
-            - minimumConversationWidth;
-        var maximumWidth = Math.Min(column.MaxWidth, availableWidth);
-        if (maximumWidth < column.MinWidth)
+        if (_closing) return false;
+        _closing = true;
+        try
         {
-            return;
+            if (_host is null) return true;
+            if (!await ConfirmCloseAsync(_host.Workspace.Tabs.Select(t => t.Id))) return false;
+            Tabs.IsEnabled = false;
+            await _host.Workspace.CloseAsync();
+            _workspaceCancellation?.Cancel();
+            if (_utilityTask is not null) await _utilityTask;
+            _host.Workspace.Changed -= OnWorkspaceChanged;
+            foreach (var entry in _views.Values) { entry.Page.Detach(); entry.View.Dispose(); }
+            _views.Clear(); Tabs.TabItems.Clear(); _host = null;
+            _workspaceCancellation?.Dispose(); _workspaceCancellation = null;
+            return true;
         }
-
-        column.Width = new GridLength(Math.Clamp(
-            requestedWidth,
-            column.MinWidth,
-            maximumWidth));
+        catch (Exception error) { ShowError($"정리를 완료하지 못했습니다: {error.Message}"); return false; }
+        finally { _closing = false; Tabs.IsEnabled = true; }
     }
-
-    private async void OnModelSelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void OnChangeWorkspace(object? sender, EventArgs args)
     {
-        if (_viewModel is not null && ModelSelector.SelectedValue is string model)
-        {
-            await _viewModel.SelectModelAsync(model);
-        }
-    }
-
-    private async void OnReasoningEffortSelectionChanged(
-        object sender,
-        SelectionChangedEventArgs e)
-    {
-        if (_viewModel is not null
-            && ReasoningEffortSelector.SelectedValue is string effort)
-        {
-            await _viewModel.SetReasoningEffortAsync(effort);
-        }
-    }
-
-    private void OnToolsMenu(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel is null || sender is not Button button)
-        {
-            return;
-        }
-
-        var systemPromptItem = new MenuFlyoutItem
-        {
-            Text = "시스템 프롬프트 보기",
-            Icon = new FontIcon { Glyph = "\uE8A5" },
-        };
-        systemPromptItem.Click += OnShowSystemPrompt;
-
-        var menu = new MenuFlyout();
-        menu.Items.Add(systemPromptItem);
-        menu.ShowAt(button);
-    }
-
-    private void OnShowSystemPrompt(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel is null)
-        {
-            return;
-        }
-
-        _systemPromptPreviousFocus = FocusManager.GetFocusedElement(XamlRoot) as Control;
-        SystemPromptBox.Text = _viewModel.SystemInstructions;
-        SystemPromptOverlay.Visibility = Visibility.Visible;
-        ResizeSystemPromptModal(
-            Math.Min(960, Math.Max(400, RootLayout.ActualWidth - 64)),
-            Math.Min(680, Math.Max(300, RootLayout.ActualHeight - 64)));
-        DispatcherQueue.TryEnqueue(() => SystemPromptBox.Focus(FocusState.Programmatic));
-    }
-
-    private void OnCopySystemPrompt(object sender, RoutedEventArgs e)
-    {
-        var package = new DataPackage();
-        package.SetText(SystemPromptBox.Text);
-        Clipboard.SetContent(package);
-    }
-
-    private void OnCloseSystemPrompt(object sender, RoutedEventArgs e) => CloseSystemPrompt();
-
-    private void OnSystemPromptOverlayKeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (e.Key != VirtualKey.Escape)
-        {
-            return;
-        }
-
-        CloseSystemPrompt();
-        e.Handled = true;
-    }
-
-    private void CloseSystemPrompt()
-    {
-        SystemPromptOverlay.Visibility = Visibility.Collapsed;
-
-        var previousFocus = _systemPromptPreviousFocus;
-        _systemPromptPreviousFocus = null;
-        if (previousFocus is not null)
-        {
-            DispatcherQueue.TryEnqueue(() => previousFocus.Focus(FocusState.Programmatic));
-        }
-    }
-
-    private void OnSystemPromptResizeDragDelta(object sender, DragDeltaEventArgs e) =>
-        ResizeSystemPromptModal(
-            SystemPromptModal.ActualWidth + e.HorizontalChange,
-            SystemPromptModal.ActualHeight + e.VerticalChange);
-
-    private void OnSystemPromptOverlaySizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (SystemPromptOverlay.Visibility == Visibility.Visible)
-        {
-            ResizeSystemPromptModal(SystemPromptModal.ActualWidth, SystemPromptModal.ActualHeight);
-        }
-    }
-
-    private void ResizeSystemPromptModal(double requestedWidth, double requestedHeight)
-    {
-        const double overlayMargin = 32;
-        var maximumWidth = Math.Max(1, RootLayout.ActualWidth - overlayMargin);
-        var maximumHeight = Math.Max(1, RootLayout.ActualHeight - overlayMargin);
-        var minimumWidth = Math.Min(400, maximumWidth);
-        var minimumHeight = Math.Min(300, maximumHeight);
-
-        SystemPromptModal.Width = Math.Clamp(requestedWidth, minimumWidth, maximumWidth);
-        SystemPromptModal.Height = Math.Clamp(requestedHeight, minimumHeight, maximumHeight);
-    }
-
-    private async void OnToggleAuthentication(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel is not null)
-        {
-            await _viewModel.ToggleAuthenticationAsync();
-        }
-    }
-
-    private async void OnSendOrCancel(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel is not null)
-        {
-            await _viewModel.SendOrCancelAsync();
-        }
-    }
-
-    private void OnPromptKeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (_viewModel is null)
-        {
-            return;
-        }
-
-        if (e.Key == VirtualKey.Tab && _viewModel.Suggestions.FirstOrDefault() is { } first)
-        {
-            _viewModel.CompleteSuggestion(first);
-            PromptBox.SelectionStart = PromptBox.Text.Length;
-            e.Handled = true;
-            return;
-        }
-
-        if (e.Key == VirtualKey.Escape && _viewModel.Suggestions.Count > 0)
-        {
-            _viewModel.Suggestions.Clear();
-            e.Handled = true;
-            return;
-        }
-
-    }
-
-    private async void OnPromptSendAcceleratorInvoked(
-        KeyboardAccelerator sender,
-        KeyboardAcceleratorInvokedEventArgs e)
-    {
-        if (_viewModel is null)
-        {
-            return;
-        }
-
-        e.Handled = true;
-        await _viewModel.SendOrCancelAsync();
-    }
-
-    private void OnSuggestionDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
-    {
-        if (_viewModel is not null
-            && SuggestionList.SelectedItem is SuggestionItemViewModel suggestion)
-        {
-            _viewModel.CompleteSuggestion(suggestion);
-            PromptBox.SelectionStart = PromptBox.Text.Length;
-            PromptBox.Focus(FocusState.Programmatic);
-        }
-    }
-
-    private async void OnImportLegacyData(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel is not null)
-        {
-            await _viewModel.ImportLegacyDataAsync();
-            LegacyInfoBar.IsOpen = false;
-        }
-    }
-
-    private async void OnChangeWorkspace(object sender, RoutedEventArgs e)
-    {
-        CancelAndDispose();
-        DataContext = null;
-        Shell.Visibility = Visibility.Collapsed;
+        if (!await TryCloseAsync()) return;
+        WorkspaceShell.Visibility = Visibility.Collapsed;
         WorkspacePanel.Visibility = Visibility.Visible;
         await LoadRecentWorkspacesAsync();
     }
-
-    private void OnErrorClosed(InfoBar sender, object args) =>
-        _viewModel?.ClearError();
-
-    private void OnExitRequested(object? sender, EventArgs e) => App.Window.Close();
-
-    private void ShowWorkspaceError(string message)
+    private void ShowError(string message)
     {
-        WorkspaceError.Message = message;
-        WorkspaceError.IsOpen = true;
+        WorkspaceError.Message = message; WorkspaceError.IsOpen = true;
+        ShellError.Message = message; ShellError.IsOpen = true;
     }
-
 }

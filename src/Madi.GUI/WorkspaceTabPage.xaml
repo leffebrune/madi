@@ -1,0 +1,614 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="Madi.GUI.WorkspaceTabPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:primitives="using:Microsoft.UI.Xaml.Controls.Primitives"
+    xmlns:local="using:Madi.GUI"
+    xmlns:presentation="using:Madi.GUI.Presentation"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <Page.Resources>
+        <local:BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        <local:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVisibility" />
+        <local:CountToVisibilityConverter x:Key="CountToVisibility" />
+        <local:NavigationIndentConverter x:Key="NavigationIndent" />
+        <local:HeaderWeightConverter x:Key="HeaderWeight" />
+        <local:TimelineBrushConverter x:Key="TimelineBrush" />
+        <local:TimelineAlignmentConverter x:Key="TimelineAlignment" />
+
+        <DataTemplate x:Key="NavigationTemplate" x:DataType="presentation:NavigationItemViewModel">
+            <Grid Margin="{Binding Indent, Converter={StaticResource NavigationIndent}}"
+                  Padding="6,2"
+                  ColumnSpacing="4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding DisplayTitle}"
+                           VerticalAlignment="Center"
+                           FontWeight="{Binding IsHeader, Converter={StaticResource HeaderWeight}}"
+                           TextTrimming="CharacterEllipsis"
+                           AutomationProperties.Name="{Binding DisplayTitle}" />
+                <Button Grid.Column="1"
+                        Width="28"
+                        Height="28"
+                        Padding="0"
+                        Click="OnNavigationMenuClick"
+                        Visibility="{Binding HasMenu, Converter={StaticResource BoolToVisibility}}"
+                        ToolTipService.ToolTip="항목 메뉴"
+                        AutomationProperties.Name="항목 메뉴">
+                    <FontIcon Glyph="&#xE712;" FontSize="12" />
+                </Button>
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="SuggestionTemplate" x:DataType="presentation:SuggestionItemViewModel">
+            <TextBlock Text="{Binding DisplayText}" TextTrimming="CharacterEllipsis" />
+        </DataTemplate>
+
+        <DataTemplate x:Key="TimelineTemplate" x:DataType="presentation:TimelineItemViewModel">
+            <Border MaxWidth="1200"
+                    Margin="12,5"
+                    Padding="14,10"
+                    CornerRadius="10"
+                    HorizontalAlignment="{Binding Kind, Converter={StaticResource TimelineAlignment}}"
+                    Background="{Binding Kind, Converter={StaticResource TimelineBrush}}">
+                <StackPanel Spacing="7">
+                    <TextBlock Text="{Binding RoleLabel}"
+                               FontWeight="SemiBold"
+                               Visibility="{Binding ShowsRoleLabel, Converter={StaticResource BoolToVisibility}}" />
+                    <Button Width="28"
+                            Height="28"
+                            Padding="0"
+                            HorizontalAlignment="Right"
+                            IsEnabled="{Binding CanDeleteFromHere}"
+                            Visibility="{Binding IsUser, Converter={StaticResource BoolToVisibility}}"
+                            Click="OnConversationItemMenuClick"
+                            ToolTipService.ToolTip="메시지 메뉴"
+                            AutomationProperties.Name="사용자 메시지 메뉴">
+                        <FontIcon Glyph="&#xE712;" FontSize="12" />
+                    </Button>
+                    <Grid ColumnSpacing="8"
+                          HorizontalAlignment="Right"
+                          Visibility="{Binding IsAssistant, Converter={StaticResource BoolToVisibility}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding TimingText}"
+                                   FontSize="12"
+                                   Opacity="0.65"
+                                   VerticalAlignment="Center"
+                                   Visibility="{Binding HasTiming, Converter={StaticResource BoolToVisibility}}" />
+                        <Button Grid.Column="1"
+                                Content="원문 복사"
+                                Padding="8,2"
+                                Click="OnCopyAssistantMarkdown"
+                                ToolTipService.ToolTip="Markdown 원문 복사"
+                                AutomationProperties.Name="Markdown 원문 복사" />
+                    </Grid>
+                    <local:MarkdownView Markdown="{Binding RenderedText}"
+                                        Visibility="{Binding IsActivity, Converter={StaticResource InverseBoolToVisibility}}" />
+                    <Grid ColumnSpacing="6"
+                          Visibility="{Binding IsActivity, Converter={StaticResource BoolToVisibility}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ProgressRing Width="14"
+                                      Height="14"
+                                      VerticalAlignment="Top"
+                                      IsActive="{Binding IsRunning}"
+                                      Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}}" />
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding Text}"
+                                   FontWeight="SemiBold"
+                                   IsTextSelectionEnabled="True" />
+                        <TextBlock Grid.Column="2" Text="—" />
+                        <TextBlock Grid.Column="3"
+                                   Text="{Binding Description}"
+                                   TextWrapping="Wrap"
+                                   IsTextSelectionEnabled="True" />
+                        <TextBlock Grid.Column="4"
+                                   Margin="6,0,0,0"
+                                   Text="{Binding TimingText}"
+                                   FontSize="12"
+                                   Opacity="0.65"
+                                   VerticalAlignment="Center"
+                                   Visibility="{Binding HasTiming, Converter={StaticResource BoolToVisibility}}" />
+                        <Button Grid.Column="5"
+                                Content="{Binding ActivityToggleLabel}"
+                                Padding="8,2"
+                                VerticalAlignment="Top"
+                                Click="OnToggleActivityDetails"
+                                ToolTipService.ToolTip="도구 및 서브에이전트 상세 보기"
+                                AutomationProperties.Name="{Binding ActivityToggleLabel}" />
+                    </Grid>
+                    <local:MarkdownView Margin="0,8,0,0"
+                                        Markdown="{Binding ActivityDetailsMarkdown}"
+                                        Visibility="{Binding IsActivityExpanded, Converter={StaticResource BoolToVisibility}}" />
+                    <StackPanel Margin="0,4,0,0"
+                                Spacing="6"
+                                Visibility="{Binding IsActivityExpanded, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="호출한 도구"
+                                   FontWeight="SemiBold"
+                                   Visibility="{Binding HasChildTools, Converter={StaticResource BoolToVisibility}}" />
+                        <ItemsControl ItemsSource="{Binding ChildTools}"
+                                      Visibility="{Binding HasChildTools, Converter={StaticResource BoolToVisibility}}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="presentation:CompactToolActivityViewModel">
+                                    <Grid Padding="8,4"
+                                          ColumnSpacing="6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <ProgressRing Width="14"
+                                                      Height="14"
+                                                      VerticalAlignment="Top"
+                                                      IsActive="{Binding IsRunning}"
+                                                      Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}}" />
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding Name}"
+                                                   FontWeight="SemiBold"
+                                                   IsTextSelectionEnabled="True" />
+                                        <TextBlock Grid.Column="2" Text="—" />
+                                        <TextBlock Grid.Column="3"
+                                                   Text="{Binding Description}"
+                                                   TextWrapping="Wrap"
+                                                   IsTextSelectionEnabled="True" />
+                                        <TextBlock Grid.Column="4"
+                                                   Margin="6,0,0,0"
+                                                   Text="실패"
+                                                   Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                                   Visibility="{Binding IsError, Converter={StaticResource BoolToVisibility}}" />
+                                        <TextBlock Grid.Column="5"
+                                                   Margin="6,0,0,0"
+                                                   Text="{Binding TimingText}"
+                                                   FontSize="12"
+                                                   Opacity="0.65"
+                                                   Visibility="{Binding HasTiming, Converter={StaticResource BoolToVisibility}}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                    <Expander Header="상세"
+                              IsExpanded="{Binding IsStandaloneDetailsExpanded, Mode=TwoWay}"
+                              Visibility="{Binding ShowsStandaloneDetails, Converter={StaticResource BoolToVisibility}}">
+                        <local:MarkdownView Margin="0,8,0,0"
+                                            Markdown="{Binding StandaloneDetailsMarkdown}" />
+                    </Expander>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+    </Page.Resources>
+
+    <Grid x:Name="RootLayout">
+        <Grid x:Name="Shell" SizeChanged="OnShellSizeChanged">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="SidebarColumn" Width="280" MinWidth="180" MaxWidth="520" />
+                <ColumnDefinition Width="6" />
+                <ColumnDefinition Width="*" MinWidth="360" />
+                <ColumnDefinition Width="6" />
+                <ColumnDefinition x:Name="WorkPanelColumn" Width="300" MinWidth="220" MaxWidth="640" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}">
+                <Grid Padding="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="대화" FontSize="20" FontWeight="SemiBold" Margin="6,6,6,12" />
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+                        <Button Content="새 대화" Click="OnNewSessionMenu"
+                                IsEnabled="{Binding CanNavigate}"
+                                ToolTipService.ToolTip="새 대화 유형 선택"
+                                AutomationProperties.Name="새 대화 만들기" />
+                        <Button Content="새 Work" Click="OnNewWork"
+                                IsEnabled="{Binding CanNavigate}"
+                                AutomationProperties.Name="새 Work 만들기" />
+                    </StackPanel>
+                    <ListView x:Name="NavigationList"
+                              Grid.Row="2"
+                              ItemsSource="{Binding NavigationItems}"
+                              SelectedItem="{Binding SelectedNavigationItem, Mode=OneWay}"
+                              ItemTemplate="{StaticResource NavigationTemplate}"
+                              IsItemClickEnabled="True"
+                              ItemClick="OnNavigationItemClick"
+                              PreviewKeyDown="OnNavigationPreviewKeyDown"
+                              SelectionMode="Single"
+                              IsEnabled="{Binding CanNavigate}"
+                              AutomationProperties.Name="작업공간 대화 목록" />
+                    <Button Grid.Row="3" Content="작업공간 변경" Click="OnChangeWorkspace"
+                            IsEnabled="{Binding CanNavigate}" HorizontalAlignment="Stretch" />
+                </Grid>
+            </Border>
+
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border Padding="18,12" BorderThickness="0,0,0,1"
+                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
+                    <Grid ColumnSpacing="8" RowSpacing="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="{Binding HeaderTitle}" FontSize="20" FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding WorkingDirectory}" FontSize="12" Opacity="0.65"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <Grid Grid.Row="1" Grid.ColumnSpan="3" ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="120" />
+                            </Grid.ColumnDefinitions>
+                        <ComboBox x:Name="ModelSelector" HorizontalAlignment="Stretch"
+                                  ItemsSource="{Binding Models}"
+                                  DisplayMemberPath="DisplayName"
+                                  SelectedValuePath="Key"
+                                  SelectedValue="{Binding SelectedModelName, Mode=OneWay}"
+                                  SelectionChanged="OnModelSelectionChanged"
+                                  IsEnabled="{Binding CanInteract}"
+                                  Header="모델"
+                                  AutomationProperties.Name="모델 선택" />
+                        <ComboBox x:Name="ReasoningEffortSelector" Grid.Column="1" HorizontalAlignment="Stretch"
+                                  ItemsSource="{Binding ReasoningEfforts}"
+                                  DisplayMemberPath="DisplayName"
+                                  SelectedValuePath="Key"
+                                  SelectedValue="{Binding SelectedReasoningEffortKey, Mode=OneWay}"
+                                  SelectionChanged="OnReasoningEffortSelectionChanged"
+                                  IsEnabled="{Binding CanSelectReasoningEffort}"
+                                  Header="추론 수준"
+                                  AutomationProperties.Name="추론 수준 선택" />
+                        </Grid>
+                        <Button Grid.Column="1"
+                                Content="{Binding AuthenticationLabel}"
+                                Click="OnToggleAuthentication"
+                                IsEnabled="{Binding CanToggleAuthentication}"
+                                VerticalAlignment="Bottom"
+                                AutomationProperties.Name="로그인 상태" />
+                        <Button Grid.Column="2"
+                                Click="OnToolsMenu"
+                                IsEnabled="{Binding CanNavigate}"
+                                VerticalAlignment="Bottom"
+                                ToolTipService.ToolTip="기타 도구"
+                                AutomationProperties.Name="기타 도구">
+                            <FontIcon Glyph="&#xE712;" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <StackPanel Grid.Row="1">
+                    <InfoBar IsOpen="{Binding HasError, Mode=OneWay}"
+                             Message="{Binding ErrorText}"
+                             Severity="Error"
+                             IsClosable="True"
+                             CloseButtonClick="OnErrorClosed">
+                        <InfoBar.ActionButton>
+                            <Button Content="해당 탭으로 이동" Click="OnGoToOwner"
+                                    Visibility="{Binding HasBlockedSession, Converter={StaticResource BoolToVisibility}}" />
+                        </InfoBar.ActionButton>
+                    </InfoBar>
+                    <InfoBar IsOpen="{Binding HasWorkConflict}" Severity="Warning"
+                             Message="다른 탭에서 Work가 변경되었습니다. 초안은 유지됩니다.">
+                        <InfoBar.ActionButton><Button Content="최신 저장본 확인" Click="OnShowLatestWork" /></InfoBar.ActionButton>
+                    </InfoBar>
+                    <InfoBar x:Name="LegacyInfoBar"
+                             Title="기존 대화 발견"
+                             Message="작업공간 정보가 없는 기존 데이터를 현재 폴더에 연결할 수 있습니다."
+                             Severity="Informational"
+                             IsOpen="False"
+                             IsClosable="True">
+                        <InfoBar.ActionButton>
+                            <Button Content="현재 작업공간에 연결" Click="OnImportLegacyData" />
+                        </InfoBar.ActionButton>
+                    </InfoBar>
+                </StackPanel>
+
+                <Grid Grid.Row="2">
+                    <ScrollViewer x:Name="TimelineScroller"
+                                  IsTabStop="True"
+                                  AllowFocusOnInteraction="True"
+                                  HorizontalScrollMode="Disabled"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollMode="Enabled"
+                                  VerticalScrollBarVisibility="Auto"
+                                  ViewChanged="OnTimelineViewChanged"
+                                  PreviewKeyDown="OnTimelinePreviewKeyDown"
+                                  AutomationProperties.Name="대화 타임라인">
+                        <ItemsControl ItemsSource="{Binding Timeline}"
+                                      ItemTemplate="{StaticResource TimelineTemplate}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Vertical" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                    </ScrollViewer>
+                    <Button x:Name="LatestButton"
+                            Content="최신으로 이동"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Bottom"
+                            Margin="0,0,0,12"
+                            Click="OnGoLatest"
+                            Visibility="Collapsed" />
+                </Grid>
+
+                <Grid Grid.Row="3" Padding="16,8,16,14">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <ListView x:Name="SuggestionList"
+                              ItemsSource="{Binding Suggestions}"
+                              ItemTemplate="{StaticResource SuggestionTemplate}"
+                              SelectionMode="Single"
+                              MaxHeight="160"
+                              Visibility="{Binding Suggestions.Count, Converter={StaticResource CountToVisibility}}"
+                              DoubleTapped="OnSuggestionDoubleTapped" />
+                    <Grid Grid.Row="1" ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="PromptBox"
+                                 Text="{Binding Draft, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 MinHeight="48"
+                                 MaxHeight="150"
+                                 PlaceholderText="Madi에게 작업을 요청하세요"
+                                 KeyDown="OnPromptKeyDown"
+                                 AutomationProperties.Name="프롬프트 입력">
+                            <TextBox.KeyboardAccelerators>
+                                <KeyboardAccelerator Key="Enter"
+                                                     Modifiers="Control"
+                                                     Invoked="OnPromptSendAcceleratorInvoked" />
+                            </TextBox.KeyboardAccelerators>
+                        </TextBox>
+                        <Button Grid.Column="1"
+                                Content="{Binding SendButtonText}"
+                                Click="OnSendOrCancel"
+                                MinWidth="76"
+                                VerticalAlignment="Stretch"
+                                AutomationProperties.Name="전송 또는 취소" />
+                    </Grid>
+                </Grid>
+
+            </Grid>
+
+            <local:ColumnResizeCursorRegion Grid.Column="1">
+                <primitives:Thumb DragDelta="OnLeftSplitterDragDelta"
+                                  ToolTipService.ToolTip="드래그하여 대화 목록 너비 조절"
+                                  AutomationProperties.Name="대화 목록 패널 크기 조절">
+                    <primitives:Thumb.Template>
+                        <ControlTemplate TargetType="primitives:Thumb">
+                            <Grid Background="Transparent">
+                                <Border Width="1"
+                                        HorizontalAlignment="Center"
+                                        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                            </Grid>
+                        </ControlTemplate>
+                    </primitives:Thumb.Template>
+                </primitives:Thumb>
+            </local:ColumnResizeCursorRegion>
+
+            <local:ColumnResizeCursorRegion Grid.Column="3">
+                <primitives:Thumb DragDelta="OnRightSplitterDragDelta"
+                                  ToolTipService.ToolTip="드래그하여 Work 관리 패널 너비 조절"
+                                  AutomationProperties.Name="Work 관리 패널 크기 조절">
+                    <primitives:Thumb.Template>
+                        <ControlTemplate TargetType="primitives:Thumb">
+                            <Grid Background="Transparent">
+                                <Border Width="1"
+                                        HorizontalAlignment="Center"
+                                        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                            </Grid>
+                        </ControlTemplate>
+                    </primitives:Thumb.Template>
+                </primitives:Thumb>
+            </local:ColumnResizeCursorRegion>
+
+            <Border Grid.Column="4"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}">
+                <Grid Padding="12">
+                    <Grid Visibility="{Binding HasCurrentWork, Converter={StaticResource BoolToVisibility}}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="Work 관리"
+                                   FontSize="20"
+                                   FontWeight="SemiBold"
+                                   Margin="6,6,6,12" />
+                        <TextBlock Grid.Row="1"
+                                   Text="Work 프롬프트"
+                                   FontWeight="SemiBold"
+                                   Margin="0,0,0,8" />
+                        <TextBox Grid.Row="2"
+                                 Text="{Binding WorkPromptDraft, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalContentAlignment="Top"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 IsEnabled="{Binding CanNavigate}"
+                                 PlaceholderText="장기 목표, 제약 사항, 작업 원칙 등을 입력하세요."
+                                 AutomationProperties.Name="Work 프롬프트 입력" />
+                        <Grid Grid.Row="3" Margin="0,10,0,0" ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="모든 대화에 적용됩니다."
+                                       FontSize="12"
+                                       Opacity="0.65"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center" />
+                            <Button Grid.Column="1"
+                                    Content="저장"
+                                    MinWidth="80"
+                                    Style="{StaticResource AccentButtonStyle}"
+                                    IsEnabled="{Binding CanSaveWorkPrompt}"
+                                    Click="OnSaveWorkPrompt"
+                                    AutomationProperties.Name="Work 프롬프트 저장" />
+                        </Grid>
+                    </Grid>
+
+                    <StackPanel VerticalAlignment="Center"
+                                Spacing="8"
+                                Visibility="{Binding HasCurrentWork, Converter={StaticResource InverseBoolToVisibility}}">
+                        <FontIcon Glyph="&#xE8A5;" FontSize="28" Opacity="0.5" />
+                        <TextBlock Text="선택된 Work가 없습니다."
+                                   TextAlignment="Center"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Text="Work를 만들거나 Work에 속한 대화를 선택하면 프롬프트를 관리할 수 있습니다."
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   Opacity="0.65" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="1"
+                    Grid.ColumnSpan="5"
+                    Padding="16,6"
+                    BorderThickness="0,1,0,0"
+                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="토큰 사용량"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding UsageText}"
+                               FontSize="12"
+                               Opacity="0.75"
+                               TextTrimming="CharacterEllipsis"
+                               HorizontalAlignment="Right"
+                               VerticalAlignment="Center"
+                               AutomationProperties.Name="토큰 사용량" />
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Grid x:Name="SystemPromptOverlay"
+              Visibility="Collapsed"
+              Background="#99000000"
+              TabFocusNavigation="Cycle"
+              SizeChanged="OnSystemPromptOverlaySizeChanged"
+              KeyDown="OnSystemPromptOverlayKeyDown"
+              AutomationProperties.Name="시스템 프롬프트 대화 상자">
+            <Border x:Name="SystemPromptModal"
+                    Width="960"
+                    Height="680"
+                    Padding="24"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="실제 시스템 프롬프트"
+                               FontSize="20"
+                               FontWeight="SemiBold" />
+                    <TextBlock Grid.Row="1"
+                               Margin="0,8,0,12"
+                               Text="모든 대화에서 모델에 전달되는 현재 Agent instruction입니다. SYSTEM.md와 현재 도구 정보로 생성됩니다."
+                               TextWrapping="Wrap"
+                               Opacity="0.75" />
+                    <TextBox x:Name="SystemPromptBox"
+                             Grid.Row="2"
+                             TextWrapping="Wrap"
+                             AcceptsReturn="True"
+                             IsReadOnly="True"
+                             VerticalContentAlignment="Top"
+                             HorizontalAlignment="Stretch"
+                             VerticalAlignment="Stretch"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             AutomationProperties.Name="실제 시스템 프롬프트 내용" />
+                    <StackPanel Grid.Row="3"
+                                Margin="0,16,0,0"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                Spacing="8">
+                        <Button Content="복사"
+                                MinWidth="80"
+                                Click="OnCopySystemPrompt" />
+                        <Button Content="닫기"
+                                MinWidth="80"
+                                Click="OnCloseSystemPrompt" />
+                    </StackPanel>
+
+                    <primitives:Thumb Grid.RowSpan="4"
+                                      Width="24"
+                                      Height="24"
+                                      Margin="0,0,-18,-18"
+                                      HorizontalAlignment="Right"
+                                      VerticalAlignment="Bottom"
+                                      DragDelta="OnSystemPromptResizeDragDelta"
+                                      IsTabStop="False"
+                                      ToolTipService.ToolTip="드래그하여 창 크기 조절"
+                                      AutomationProperties.Name="시스템 프롬프트 창 크기 조절">
+                        <primitives:Thumb.Template>
+                            <ControlTemplate TargetType="primitives:Thumb">
+                                <Grid Background="Transparent">
+                                    <FontIcon Glyph="&#xE740;"
+                                              FontSize="12"
+                                              Opacity="0.7"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                                </Grid>
+                            </ControlTemplate>
+                        </primitives:Thumb.Template>
+                    </primitives:Thumb>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Page>

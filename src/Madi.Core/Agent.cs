@@ -62,6 +62,8 @@ public sealed class Agent : IAgent
         // Keep a single user turn consistent. Runtime updates apply from the next turn,
         // including turns on sessions that are already in progress.
         var systemInstructions = SystemInstructions;
+        var model = session.Model;
+        var workInstructions = GetWorkInstructions(work);
         var pendingConversation = new List<ModelInputItem>(session.Conversation)
         {
             new UserMessage(prompt),
@@ -76,11 +78,11 @@ public sealed class Agent : IAgent
                 new ModelRequest(
                     pendingConversation,
                     _tools,
-                    session.Model,
+                    model,
                     systemInstructions,
                     session.Id,
                     _tools.Any(static tool => tool.SupportsParallelExecution),
-                    GetWorkInstructions(work)),
+                    workInstructions),
                 cancellationToken))
             {
                 switch (item)
@@ -140,6 +142,7 @@ public sealed class Agent : IAgent
                 yield break;
             }
 
+            using var toolCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var runInParallel = toolCalls.Length > 1
                                 && toolCalls.All(CanRunInParallel);
             if (runInParallel)
@@ -163,10 +166,12 @@ public sealed class Agent : IAgent
                         index,
                         call,
                         updates.Writer,
-                        cancellationToken))
+                        toolCancellation.Token))
                     .ToArray();
                 var results = new ToolExecutionResult[toolCalls.Length];
                 var completedCount = 0;
+                try
+                {
                 while (completedCount < toolCalls.Length)
                 {
                     var update = await updates.Reader.ReadAsync(cancellationToken);
@@ -201,7 +206,12 @@ public sealed class Agent : IAgent
                             apiDuration);
                     }
                 }
-                await Task.WhenAll(executions);
+                }
+                finally
+                {
+                    await toolCancellation.CancelAsync();
+                    await Task.WhenAll(executions);
+                }
 
                 for (var index = 0; index < toolCalls.Length; index++)
                 {
@@ -231,8 +241,10 @@ public sealed class Agent : IAgent
                         0,
                         toolCall,
                         updates.Writer,
-                        cancellationToken);
+                        toolCancellation.Token);
                     ToolExecutionResult? result = null;
+                    try
+                    {
                     while (result is null)
                     {
                         var update = await updates.Reader.ReadAsync(cancellationToken);
@@ -245,7 +257,12 @@ public sealed class Agent : IAgent
                             result = ((ToolExecutionFinished)update).Result;
                         }
                     }
-                    await execution;
+                    }
+                    finally
+                    {
+                        if (!execution.IsCompleted) await toolCancellation.CancelAsync();
+                        await execution;
+                    }
                     pendingConversation.Add(new ToolResult(
                         toolCall.CallId,
                         result.Output,
@@ -305,6 +322,8 @@ public sealed class Agent : IAgent
         ChannelWriter<ToolExecutionUpdate> writer,
         CancellationToken cancellationToken)
     {
+        try
+        {
         var result = await ExecuteToolAsync(
             call,
             item => writer.WriteAsync(
@@ -314,6 +333,12 @@ public sealed class Agent : IAgent
         await writer.WriteAsync(
             new ToolExecutionFinished(index, result),
             cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            writer.TryComplete(exception);
+            throw;
+        }
     }
 
     private async Task<ToolExecutionResult> ExecuteToolAsync(

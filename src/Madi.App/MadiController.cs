@@ -5,7 +5,7 @@ using Madi.Runtime.Providers;
 
 namespace Madi.App;
 
-public sealed class MadiController
+public sealed partial class MadiController
 {
     private readonly IAgent _agent;
     private readonly IWorkSessionStore _store;
@@ -450,8 +450,7 @@ public sealed class MadiController
 
             session.UpdatedAtUtc = DateTimeOffset.UtcNow;
 
-            await _store.AppendConversationAsync(session, conversationStart, cancellationToken);
-            await _store.SaveSessionAsync(session, cancellationToken);
+            await _store.CommitTurnAsync(session, conversationStart, cancellationToken);
             persisted = true;
             yield return new AppTurnCompleted(true);
             yield return new AppStateChanged(CreateState());
@@ -687,7 +686,7 @@ public sealed class MadiController
 
         await _store.SaveWorkAsync(work, cancellationToken);
         await _store.SaveSessionAsync(_currentSession, cancellationToken);
-        await _store.SetCurrentAsync(_currentSession, cancellationToken);
+        await WriteCurrentAsync(_currentSession, cancellationToken);
         yield return new AppMessage($"Work를 만들었습니다: {work.Title}");
         yield return new AppConversationLoaded(ConversationSnapshotFactory.Create(_currentSession));
         yield return new AppNavigationChanged(
@@ -739,7 +738,7 @@ public sealed class MadiController
         var session = CreateEmptySession(workId);
         work?.Sessions.Add(session);
         await _store.SaveSessionAsync(session, cancellationToken);
-        await _store.SetCurrentAsync(session, cancellationToken);
+        await WriteCurrentAsync(session, cancellationToken);
         _currentWork = work;
         _currentSession = session;
         yield return new AppMessage("새 Session을 만들었습니다.");
@@ -775,7 +774,7 @@ public sealed class MadiController
         work.Sessions.Add(session);
         await _store.SaveWorkAsync(work, cancellationToken);
         await _store.SaveSessionAsync(session, cancellationToken);
-        await _store.SetCurrentAsync(session, cancellationToken);
+        await WriteCurrentAsync(session, cancellationToken);
         _currentWork = work;
         _currentSession = session;
 
@@ -838,7 +837,7 @@ public sealed class MadiController
         _selectedModel = resolvedModel;
         conversation.Session.Model = _selectedModel;
         await _store.SaveSessionAsync(conversation.Session, cancellationToken);
-        await _store.SetCurrentAsync(conversation.Session, cancellationToken);
+        await WriteCurrentAsync(conversation.Session, cancellationToken);
         await RefreshAuthenticationAsync(cancellationToken);
 
         yield return new AppConversationLoaded(
@@ -968,7 +967,7 @@ public sealed class MadiController
             if (replacement is not null)
             {
                 _ = ResolvePersistedModel(replacement.Session, out _);
-                await _store.SetCurrentAsync(replacement.Session, cancellationToken);
+                await WriteCurrentAsync(replacement.Session, cancellationToken);
             }
         }
 
@@ -981,7 +980,7 @@ public sealed class MadiController
         {
             if (deletesCurrent && replacement is not null)
             {
-                await _store.SetCurrentAsync(conversation.Session, CancellationToken.None);
+                await WriteCurrentAsync(conversation.Session, CancellationToken.None);
             }
             throw;
         }
@@ -990,7 +989,7 @@ public sealed class MadiController
         {
             if (deletesCurrent && replacement is not null)
             {
-                await _store.SetCurrentAsync(conversation.Session, CancellationToken.None);
+                await WriteCurrentAsync(conversation.Session, CancellationToken.None);
             }
             yield return new AppMessage(
                 $"Session을 삭제하지 못했습니다: {sessionId}",
@@ -1075,7 +1074,7 @@ public sealed class MadiController
             if (replacement is not null)
             {
                 _ = ResolvePersistedModel(replacement.Session, out _);
-                await _store.SetCurrentAsync(replacement.Session, cancellationToken);
+                await WriteCurrentAsync(replacement.Session, cancellationToken);
             }
         }
 
@@ -1088,7 +1087,7 @@ public sealed class MadiController
         {
             if (deletesCurrent && replacement is not null && _currentSession is not null)
             {
-                await _store.SetCurrentAsync(_currentSession, CancellationToken.None);
+                await WriteCurrentAsync(_currentSession, CancellationToken.None);
             }
             throw;
         }
@@ -1097,7 +1096,7 @@ public sealed class MadiController
         {
             if (deletesCurrent && replacement is not null && _currentSession is not null)
             {
-                await _store.SetCurrentAsync(_currentSession, CancellationToken.None);
+                await WriteCurrentAsync(_currentSession, CancellationToken.None);
             }
             yield return new AppMessage(
                 $"Work를 삭제하지 못했습니다: {workId}",
@@ -1284,7 +1283,7 @@ public sealed class MadiController
         _currentWork = null;
         _currentSession = CreateEmptySession(workId: null);
         await _store.SaveSessionAsync(_currentSession, cancellationToken);
-        await _store.SetCurrentAsync(_currentSession, cancellationToken);
+        await WriteCurrentAsync(_currentSession, cancellationToken);
     }
 
     private Session CreateEmptySession(string? workId) => new()
