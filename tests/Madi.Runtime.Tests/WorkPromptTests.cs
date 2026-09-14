@@ -84,17 +84,25 @@ public sealed class WorkPromptTests
         Assert.True(answer.ApiDuration >= TimeSpan.FromMilliseconds(20));
     }
 
-    [Fact]
-    public async Task OpenAIProviderWritesWorkPromptAsFirstDeveloperInput()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task OpenAIProviderWritesWorkPromptAsFirstDeveloperInput(bool responses, bool project)
     {
-        var provider = new OpenAIOAuthProvider(new CompletingNetworkClient());
+        IModelProvider provider = responses
+            ? new OpenAIResponseProvider(new CompletingNetworkClient())
+            : new OpenAIOAuthProvider(new CompletingNetworkClient());
+        var instructions = WorkInstructionComposer.Compose(
+            project ? new ProjectInstructions("/AGENTS.md", "project instructions") : null, "장기 목표와 제약");
         var request = new ModelRequest(
             [new UserMessage("현재 요청")],
             [],
             new ModelOptions("test"),
             "SYSTEM.md 내용",
             "session-1",
-            WorkInstructions: "장기 목표와 제약");
+            WorkInstructions: instructions);
 
         string? body = null;
         await foreach (var item in provider.StreamAsync(request))
@@ -112,9 +120,30 @@ public sealed class WorkPromptTests
         Assert.Equal(2, input.GetArrayLength());
         Assert.Equal("developer", input[0].GetProperty("role").GetString());
         Assert.Equal(
-            "<work_prompt>\n장기 목표와 제약\n</work_prompt>",
+            "<work_prompt>\n" + instructions + "\n</work_prompt>",
             input[0].GetProperty("content")[0].GetProperty("text").GetString());
         Assert.Equal("user", input[1].GetProperty("role").GetString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProvidersOmitDeveloperMessageWhenBothInstructionsAreAbsent(bool responses)
+    {
+        IModelProvider provider = responses
+            ? new OpenAIResponseProvider(new CompletingNetworkClient())
+            : new OpenAIOAuthProvider(new CompletingNetworkClient());
+        var request = new ModelRequest([new UserMessage("request")], [], new ModelOptions("test"),
+            "system", "session", WorkInstructions: WorkInstructionComposer.Compose(null, "  "));
+        string? body = null;
+        await foreach (var item in provider.StreamAsync(request))
+        {
+            if (item is ModelRequestStarted started) body = started.Content;
+        }
+        using var document = JsonDocument.Parse(Assert.IsType<string>(body));
+        var input = document.RootElement.GetProperty("input");
+        Assert.Equal(1, input.GetArrayLength());
+        Assert.Equal("user", input[0].GetProperty("role").GetString());
     }
 
     private sealed class RecordingProvider : IModelProvider

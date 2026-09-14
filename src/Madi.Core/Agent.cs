@@ -13,6 +13,7 @@ public sealed class Agent : IAgent
 {
     public const int MaxToolRounds = 80;
 
+    private readonly IProjectInstructionLoader? _projectInstructionLoader;
     private readonly IModelProvider _provider;
     private readonly IReadOnlyList<ITool> _tools;
     private readonly IReadOnlyDictionary<string, ITool> _toolsByName;
@@ -23,12 +24,14 @@ public sealed class Agent : IAgent
         IModelProvider provider,
         string systemInstructions,
         IReadOnlyList<ITool>? tools = null,
-        Func<AgentRuntimeContext>? runtimeContextProvider = null)
+        Func<AgentRuntimeContext>? runtimeContextProvider = null,
+        IProjectInstructionLoader? projectInstructionLoader = null)
     {
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         ArgumentException.ThrowIfNullOrWhiteSpace(systemInstructions);
         _systemInstructions = systemInstructions;
         _runtimeContextProvider = runtimeContextProvider;
+        _projectInstructionLoader = projectInstructionLoader;
         _tools = tools ?? [];
         _toolsByName = _tools.ToDictionary(static tool => tool.Name, StringComparer.Ordinal);
     }
@@ -63,7 +66,11 @@ public sealed class Agent : IAgent
         // including turns on sessions that are already in progress.
         var systemInstructions = SystemInstructions;
         var model = session.Model;
-        var workInstructions = GetWorkInstructions(work);
+        var workContext = work?.Context;
+        var projectInstructions = _projectInstructionLoader is null
+            ? null
+            : await _projectInstructionLoader.LoadAsync(cancellationToken);
+        var workInstructions = WorkInstructionComposer.Compose(projectInstructions, workContext);
         var pendingConversation = new List<ModelInputItem>(session.Conversation)
         {
             new UserMessage(prompt),
@@ -165,6 +172,7 @@ public sealed class Agent : IAgent
                     .Select((call, index) => ExecuteAndPublishAsync(
                         index,
                         call,
+                        projectInstructions,
                         updates.Writer,
                         toolCancellation.Token))
                     .ToArray();
@@ -240,6 +248,7 @@ public sealed class Agent : IAgent
                     var execution = ExecuteAndPublishAsync(
                         0,
                         toolCall,
+                        projectInstructions,
                         updates.Writer,
                         toolCancellation.Token);
                     ToolExecutionResult? result = null;
@@ -313,12 +322,10 @@ public sealed class Agent : IAgent
         }
     }
 
-    private static string? GetWorkInstructions(Work? work) =>
-        string.IsNullOrWhiteSpace(work?.Context) ? null : work.Context.Trim();
-
     private async Task ExecuteAndPublishAsync(
         int index,
         ModelToolCall call,
+        ProjectInstructions? projectInstructions,
         ChannelWriter<ToolExecutionUpdate> writer,
         CancellationToken cancellationToken)
     {
@@ -326,6 +333,7 @@ public sealed class Agent : IAgent
         {
         var result = await ExecuteToolAsync(
             call,
+            projectInstructions,
             item => writer.WriteAsync(
                 new ToolExecutionProgress(item),
                 cancellationToken),
@@ -343,6 +351,7 @@ public sealed class Agent : IAgent
 
     private async Task<ToolExecutionResult> ExecuteToolAsync(
         ModelToolCall call,
+        ProjectInstructions? projectInstructions,
         Func<AgentEvent, ValueTask> onEvent,
         CancellationToken cancellationToken)
     {
@@ -358,6 +367,7 @@ public sealed class Agent : IAgent
             var output = tool is ISubagentTool subagentTool
                 ? await subagentTool.ExecuteAsync(
                     arguments.RootElement,
+                    projectInstructions,
                     item => onEvent(MapSubagentEvent(call.CallId, item)),
                     cancellationToken)
                 : await tool.ExecuteAsync(arguments.RootElement, cancellationToken);

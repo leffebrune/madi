@@ -558,7 +558,7 @@
                                FontWeight="SemiBold" />
                     <TextBlock Grid.Row="1"
                                Margin="0,8,0,12"
-                               Text="모든 대화에서 모델에 전달되는 현재 Agent instruction입니다. SYSTEM.md와 현재 도구 정보로 생성됩니다."
+                               Text="모든 대화에서 모델에 전달되는 현재 Agent instruction입니다. SYSTEM.md와 현재 도구 정보로 생성됩니다. 루트 AGENTS.md는 시스템 instruction에 포함되지 않으며, Work 지침 앞에 합쳐 별도의 developer 메시지로 전달됩니다."
                                TextWrapping="Wrap"
                                Opacity="0.75" />
                     <TextBox x:Name="SystemPromptBox"

@@ -33,4 +33,9 @@ public interface ISubagentTool : ITool
         JsonElement arguments,
         Func<SubagentRunEvent, ValueTask> onEvent,
         CancellationToken cancellationToken = default);
+    Task<string> ExecuteAsync(
+        JsonElement arguments,
+        ProjectInstructions? projectInstructions,
+        Func<SubagentRunEvent, ValueTask> onEvent,
+        CancellationToken cancellationToken = default);
 }
