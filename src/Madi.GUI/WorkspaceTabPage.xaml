@@ -47,7 +47,7 @@
         </DataTemplate>
 
         <DataTemplate x:Key="TimelineTemplate" x:DataType="presentation:TimelineItemViewModel">
-            <Border MaxWidth="1200"
+            <Border Width="1200"
                     Margin="12,5"
                     Padding="14,10"
                     CornerRadius="10"
