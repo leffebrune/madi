@@ -164,21 +164,21 @@ public sealed class FileModelCatalog : IModelCatalog
             [
                 new ModelEntryDocument
                 {
-                    Name = "gpt-5.6-luna",
+                    Name = "gpt-6-astra",
                     SupportsReasoning = true,
                     MaxContextTokens = 400000,
                     MaxOutputTokens = 128000,
                 },
                 new ModelEntryDocument
                 {
-                    Name = "gpt-5.6-terra",
+                    Name = "gpt-6-sol",
                     SupportsReasoning = true,
                     MaxContextTokens = 400000,
                     MaxOutputTokens = 128000,
                 },
                 new ModelEntryDocument
                 {
-                    Name = "gpt-5.6-sol",
+                    Name = "gpt-6-luna",
                     SupportsReasoning = true,
                     MaxContextTokens = 400000,
                     MaxOutputTokens = 128000,
