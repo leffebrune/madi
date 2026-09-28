@@ -8,7 +8,8 @@ public sealed record ModelRequest(
     string Instructions,
     string PromptCacheKey,
     bool AllowParallelToolCalls = false,
-    string? WorkInstructions = null);
+    string? WorkInstructions = null,
+    int? MaxOutputTokens = null);
 
 /// <summary>An item that can be supplied as model input on a later turn.</summary>
 public abstract record ModelInputItem;

@@ -121,6 +121,14 @@ internal static class OpenAIResponsesProtocol
             writer.WriteString("model", request.Options.Model);
             writer.WriteBoolean("store", false);
             writer.WriteBoolean("stream", true);
+            if (request.MaxOutputTokens is { } maxOutputTokens)
+            {
+                if (maxOutputTokens <= 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(request), "MaxOutputTokens must be positive.");
+                }
+                writer.WriteNumber("max_output_tokens", maxOutputTokens);
+            }
             writer.WriteString("instructions", request.Instructions);
 
             writer.WriteStartArray("input");
