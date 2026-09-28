@@ -32,6 +32,10 @@ public sealed record AvailableModel
         {
             throw new InvalidDataException($"Model '{Name}' must have a positive context window.");
         }
+        if (MaxOutputTokens is <= 0)
+        {
+            throw new InvalidDataException($"Model '{Name}' must have a positive output token limit.");
+        }
     }
 }
 

@@ -104,6 +104,7 @@ public sealed class OpenAIResponseProviderTests
         Assert.False(root.GetProperty("reasoning").TryGetProperty("summary", out _));
         Assert.False(root.TryGetProperty("text", out _));
         Assert.False(root.TryGetProperty("include", out _));
+        Assert.False(root.TryGetProperty("max_output_tokens", out _));
         Assert.True(root.GetProperty("parallel_tool_calls").GetBoolean());
 
         var input = root.GetProperty("input");
@@ -116,6 +117,19 @@ public sealed class OpenAIResponseProviderTests
         var tool = Assert.Single(root.GetProperty("tools").EnumerateArray());
         Assert.Equal("function", tool.GetProperty("type").GetString());
         Assert.Equal("test_tool", tool.GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public async Task SendsConfiguredMaxOutputTokensToResponsesEndpoint()
+    {
+        var client = RecordingNetworkClient.Completing();
+        var provider = new OpenAIResponseProvider(client);
+        var request = CreateRequest() with { MaxOutputTokens = 128000 };
+
+        await CollectAsync(provider.StreamAsync(request));
+
+        using var document = JsonDocument.Parse(Assert.IsType<string>(client.Content));
+        Assert.Equal(128000, document.RootElement.GetProperty("max_output_tokens").GetInt32());
     }
 
     [Theory]
