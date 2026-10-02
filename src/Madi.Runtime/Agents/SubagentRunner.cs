@@ -152,6 +152,8 @@ public sealed class SubagentRunner : ISubagentRunner
                             completed.IsError,
                             completed.ToolDuration));
                         break;
+                    case AgentResponseStopped stopped:
+                        throw new InvalidOperationException($"Subagent '{definition.Name}': {stopped.Message}");
                     case AgentResponseCompleted completed:
                         result = completed.Text;
                         break;

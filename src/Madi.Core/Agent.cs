@@ -11,7 +11,11 @@ namespace Madi.Core;
 /// </summary>
 public sealed class Agent : IAgent
 {
-    public const int MaxToolRounds = 80;
+    // Maximum model requests per user turn, not individual tool executions.
+    public const int MaxToolRounds = 200;
+
+    private const string LoopWarning = "Runtime warning: Identical tool calls and results have repeated for three consecutive rounds. "
+        + "Do not repeat the same approach. Diagnose the cause, try another approach, or explain why progress is blocked.";
 
     private readonly IProjectInstructionLoader? _projectInstructionLoader;
     private readonly IModelProvider _provider;
@@ -52,10 +56,15 @@ public sealed class Agent : IAgent
         }
     }
 
+    public IAsyncEnumerable<AgentEvent> RespondAsync(
+        Work? work, Session session, string prompt, CancellationToken cancellationToken = default) =>
+        RespondAsync(work, session, prompt, null, cancellationToken);
+
     public async IAsyncEnumerable<AgentEvent> RespondAsync(
         Work? work,
         Session session,
         string prompt,
+        AgentInputQueue? inputs,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(session);
@@ -76,22 +85,38 @@ public sealed class Agent : IAgent
             new UserMessage(prompt),
         };
 
+        var loopDetector = new ToolLoopDetector();
+        var loopWarningActive = false;
         for (var round = 0; round < MaxToolRounds; round++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            var additions = inputs?.Drain() ?? [];
+            var additionsStart = pendingConversation.Count;
+            foreach (var input in additions)
+                pendingConversation.Add(new UserMessage(input.Text));
+            var announcedInputs = false;
             ModelResponse? response = null;
             var apiStopwatch = Stopwatch.StartNew();
 
             await foreach (var item in _provider.StreamAsync(
                 new ModelRequest(
-                    pendingConversation,
+                    pendingConversation.ToArray(),
                     _tools,
                     model,
-                    systemInstructions,
+                    loopWarningActive ? systemInstructions + "\n\n" + LoopWarning : systemInstructions,
                     session.Id,
                     _tools.Any(static tool => tool.SupportsParallelExecution),
                     workInstructions),
                 cancellationToken))
             {
+                // The provider has begun processing this immutable request. This is not
+                // a server acknowledgement or a promise that the instruction was obeyed.
+                if (!announcedInputs)
+                {
+                    announcedInputs = true;
+                    for (var index = 0; index < additions.Count; index++)
+                        yield return new AgentInputIncluded(additions[index], additionsStart + index);
+                }
                 switch (item)
                 {
                     case ModelRequestStarted started:
@@ -143,12 +168,17 @@ public sealed class Agent : IAgent
 
             if (toolCalls.Length == 0)
             {
-                session.Conversation.Clear();
-                session.Conversation.AddRange(pendingConversation);
+                if (inputs is not null && !inputs.TryClose())
+                {
+                    yield return new AgentAssistantCompleted(response.OutputText, apiDuration);
+                    continue;
+                }
+                CommitConversation(session, pendingConversation);
                 yield return new AgentResponseCompleted(response.OutputText, apiDuration);
                 yield break;
             }
 
+            var resultsStart = pendingConversation.Count;
             using var toolCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var runInParallel = toolCalls.Length > 1
                                 && toolCalls.All(CanRunInParallel);
@@ -298,10 +328,31 @@ public sealed class Agent : IAgent
                     }
                 }
             }
+
+            var decision = loopDetector.ObserveRound(
+                toolCalls,
+                pendingConversation.Skip(resultsStart).Cast<ToolResult>().ToArray());
+            loopWarningActive = loopDetector.WarningActive;
+            if (decision == ToolLoopDecision.Stop)
+            {
+                CommitConversation(session, pendingConversation);
+                yield return new AgentResponseStopped(
+                    AgentStopReason.ToolLoop,
+                    "동일한 도구 호출과 결과가 5개 라운드 연속 반복되어 중단했습니다. 완료된 대화와 도구 결과는 보존됩니다.");
+                yield break;
+            }
         }
 
-        throw new InvalidOperationException(
-            $"The model exceeded the maximum of {MaxToolRounds} consecutive tool-call rounds.");
+        CommitConversation(session, pendingConversation);
+        yield return new AgentResponseStopped(
+            AgentStopReason.RoundLimit,
+            $"사용자 턴당 최대 모델 호출 라운드 {MaxToolRounds}회에 도달하여 중단했습니다. 완료된 대화와 도구 결과는 보존됩니다.");
+    }
+
+    private static void CommitConversation(Session session, List<ModelInputItem> conversation)
+    {
+        session.Conversation.Clear();
+        session.Conversation.AddRange(conversation);
     }
 
     private static void ValidateWorkSessionRelationship(Work? work, Session session)

@@ -13,4 +13,8 @@ public interface IAgent
         Session session,
         string prompt,
         CancellationToken cancellationToken = default);
+    IAsyncEnumerable<AgentEvent> RespondAsync(
+        Work? work, Session session, string prompt, AgentInputQueue? inputs,
+        CancellationToken cancellationToken = default) =>
+        RespondAsync(work, session, prompt, cancellationToken);
 }

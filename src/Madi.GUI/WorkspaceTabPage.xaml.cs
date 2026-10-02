@@ -773,6 +773,8 @@ public sealed partial class WorkspaceTabPage : Page
         }
     }
 
+    private void OnStop(object sender, RoutedEventArgs e) => _viewModel?.Cancel();
+
     private async void OnSendOrCancel(object sender, RoutedEventArgs e)
     {
         if (_viewModel is not null)
