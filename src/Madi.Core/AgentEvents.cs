@@ -56,3 +56,10 @@ public sealed record AgentAssistantCompleted(
 public sealed record AgentResponseCompleted(
     string Text,
     TimeSpan ApiDuration = default) : AgentEvent;
+
+public enum AgentStopReason { RoundLimit, ToolLoop }
+
+/// <summary>A protective stop after a complete tool round; conversation has been committed.</summary>
+public sealed record AgentResponseStopped(AgentStopReason Reason, string Message) : AgentEvent;
+
+public sealed record AgentInputIncluded(AgentInput Input, int ConversationIndex) : AgentEvent;

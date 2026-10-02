@@ -38,7 +38,7 @@ public sealed class WorkspaceViewModelTests
         var child = a.Timeline.Single(t => t.Kind == TimelineItemKind.Subagent); child.IsActivityExpanded = true;
         await w.CreateSessionAsync(tab.Id, null); await view.SynchronizeAsync(); var c = view.Current!;
         c.Draft = "unsent C";
-        h.Agent.Run("A").Release.SetResult(); await Wait(send);
+        h.Agent.Run("A").Release.SetResult(); await Wait(send); await Wait(a.Runtime!.Completion);
         Assert.DoesNotContain(c.Timeline, t => t.Text.Contains("A")); Assert.Equal("unsent C", c.Draft);
         await w.SelectAsync(tab.Id, a.CurrentSessionId!); await view.SynchronizeAsync();
         Assert.Same(a, view.Current); Assert.Equal("unsent A", a.Draft);

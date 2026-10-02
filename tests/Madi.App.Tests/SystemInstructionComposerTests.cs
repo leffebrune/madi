@@ -24,7 +24,8 @@ public sealed class SystemInstructionComposerTests
         var result = SystemInstructionComposer.Compose("  You are Madi.  ", [tool]);
 
         var normalized = result.ReplaceLineEndings("\n");
-        Assert.StartsWith("You are Madi.\n\n# Available tools", normalized);
+        Assert.StartsWith("You are Madi.\n\n# Additional user instructions", normalized);
+        Assert.Contains("# Available tools", normalized);
         Assert.Contains("## subagent", normalized);
         Assert.Contains("Available subagents:\n- reviewer: Reviews code", normalized);
         Assert.Contains("\"enum\": [\n        \"reviewer\"", normalized);
@@ -49,11 +50,12 @@ public sealed class SystemInstructionComposerTests
     }
 
     [Fact]
-    public void ComposeWithoutToolsReturnsTrimmedSystemMarkdown()
+    public void ComposeWithoutToolsStillIncludesAdditionalInputPolicy()
     {
-        Assert.Equal(
-            "You are Madi.",
-            SystemInstructionComposer.Compose("\nYou are Madi.\n", []));
+        var result = SystemInstructionComposer.Compose("\nYou are Madi.\n", []);
+        Assert.StartsWith("You are Madi.\n\n", result);
+        Assert.Contains("latest user instruction", result);
+        Assert.Contains("higher-priority instructions", result);
     }
 
     private sealed class TestTool : ITool

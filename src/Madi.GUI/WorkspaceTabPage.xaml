@@ -369,6 +369,20 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
+                    <StackPanel>
+                    <ScrollViewer MaxHeight="140"
+                                  Visibility="{Binding PendingInputs.Count, Converter={StaticResource CountToVisibility}}">
+                        <ItemsControl ItemsSource="{Binding PendingInputs}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,2,0,6">
+                                        <TextBlock Text="{Binding Text}" TextWrapping="Wrap" MaxLines="3" />
+                                        <TextBlock Text="전달 대기 중" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
                     <ListView x:Name="SuggestionList"
                               ItemsSource="{Binding Suggestions}"
                               ItemTemplate="{StaticResource SuggestionTemplate}"
@@ -376,9 +390,11 @@
                               MaxHeight="160"
                               Visibility="{Binding Suggestions.Count, Converter={StaticResource CountToVisibility}}"
                               DoubleTapped="OnSuggestionDoubleTapped" />
+                    </StackPanel>
                     <Grid Grid.Row="1" ColumnSpacing="10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <TextBox x:Name="PromptBox"
@@ -398,10 +414,15 @@
                         </TextBox>
                         <Button Grid.Column="1"
                                 Content="{Binding SendButtonText}"
+                                IsEnabled="{Binding CanSubmitPrompt}"
+                                ToolTipService.ToolTip="추가 지시는 현재 도구 호출 묶음이 끝난 뒤 다음 모델 요청에 전달됩니다."
                                 Click="OnSendOrCancel"
                                 MinWidth="76"
                                 VerticalAlignment="Stretch"
-                                AutomationProperties.Name="전송 또는 취소" />
+                                AutomationProperties.Name="메시지 전송" />
+                        <Button Grid.Column="2" Content="중지" Click="OnStop"
+                                IsEnabled="{Binding IsBusy}" MinWidth="60"
+                                ToolTipService.ToolTip="실행을 중지합니다. 이미 수행한 변경은 자동 취소되지 않습니다." />
                     </Grid>
                 </Grid>
 

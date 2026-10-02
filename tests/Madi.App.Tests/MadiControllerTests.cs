@@ -8,6 +8,45 @@ namespace Madi.App.Tests;
 
 public sealed class MadiControllerTests
 {
+    [Theory]
+    [InlineData(AgentStopReason.RoundLimit)]
+    [InlineData(AgentStopReason.ToolLoop)]
+    public async Task ProtectiveStopCommitsConversationAndReportsFailure(AgentStopReason reason)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "madi-protection-" + Guid.NewGuid());
+        try
+        {
+            var store = new Madi.Runtime.Persistence.FileWorkSessionStore(root);
+            var agent = new StubAgent((session, _) =>
+            {
+                session.Conversation.AddRange([
+                    new UserMessage("run"),
+                    new ModelToolCall("test", "call", "test", "{}", "{}"),
+                    new ToolResult("call", "done"),
+                ]);
+                return Task.FromResult<IReadOnlyList<AgentEvent>>([
+                    new AgentResponseStopped(reason, "protective stop"),
+                ]);
+            });
+            var controller = new MadiController(agent, store,
+                new ModelOptions("first"), [Model("first")], new StubAuthentication(), root);
+            var events = await CollectAsync(controller.ExecuteAsync("run"));
+            Assert.Contains(events, e => e is AppTurnCompleted { Succeeded: false });
+            Assert.DoesNotContain(events, e => e is AppTurnCompleted { Succeeded: true });
+            Assert.Contains(events, e => e is AppMessage { Text: "protective stop", Kind: AppMessageKind.Error });
+            var restored = await new Madi.Runtime.Persistence.FileWorkSessionStore(root)
+                .LoadConversationAsync(controller.State.Session!.Id);
+            Assert.NotNull(restored);
+            Assert.Equal(3, restored.Session.Conversation.Count);
+            Assert.Equal("call", Assert.Single(restored.Session.Conversation.OfType<ToolResult>()).CallId);
+            Assert.Equal("run", restored.Session.Title);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
     [Fact]
     public void CommandCatalogHasTheSharedCommands()
     {

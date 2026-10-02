@@ -8,6 +8,8 @@ namespace Madi.App;
 public sealed partial class MadiController
 {
     private readonly IAgent _agent;
+    internal AgentInputQueue? Inputs { get; set; }
+    internal AgentInput? ResumedInput { get; set; }
     private readonly IWorkSessionStore _store;
     private readonly IModelAuthenticationCoordinator _authentication;
     private readonly IReadOnlyList<AvailableModel> _availableModels;
@@ -356,21 +358,34 @@ public sealed partial class MadiController
         var originalTitle = session.Title;
         var originalUpdatedAtUtc = session.UpdatedAtUtc;
         var agentCompleted = false;
+        AgentResponseStopped? protectiveStop = null;
         var persisted = false;
         var toolArguments = new Dictionary<string, string>(StringComparer.Ordinal);
         var subagentPrompts = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        yield return new AppUserInput(prompt, session.Id, conversationStart);
+        var resumedInput = ResumedInput;
+        yield return new AppUserInput(prompt, session.Id, conversationStart, resumedInput?.Id);
         try
         {
             await foreach (var item in _agent.RespondAsync(
                 _currentWork,
                 session,
                 prompt,
+                Inputs,
                 cancellationToken))
             {
+                if (resumedInput is not null)
+                {
+                    yield return new AppInputStatus(resumedInput, InputDeliveryState.Included);
+                    resumedInput = null;
+                }
                 switch (item)
                 {
+                    case AgentInputIncluded included:
+                        yield return new AppInputStatus(included.Input, InputDeliveryState.Included);
+                        yield return new AppUserInput(included.Input.Text, session.Id,
+                            included.ConversationIndex, included.Input.Id);
+                        break;
                     case AgentTextDelta delta:
                         yield return new AppAssistantDelta(delta.Text);
                         break;
@@ -428,6 +443,9 @@ public sealed partial class MadiController
                             completed.ApiDuration,
                             completed.Text);
                         break;
+                    case AgentResponseStopped stopped:
+                        protectiveStop = stopped;
+                        break;
                     case AgentResponseCompleted completed:
                         agentCompleted = true;
                         yield return new AppAssistantCompleted(
@@ -437,7 +455,7 @@ public sealed partial class MadiController
                 }
             }
 
-            if (!agentCompleted)
+            if (!agentCompleted && protectiveStop is null)
             {
                 throw new InvalidOperationException("에이전트가 완료 이벤트 없이 응답을 종료했습니다.");
             }
@@ -452,7 +470,9 @@ public sealed partial class MadiController
 
             await _store.CommitTurnAsync(session, conversationStart, cancellationToken);
             persisted = true;
-            yield return new AppTurnCompleted(true);
+            if (protectiveStop is not null)
+                yield return new AppMessage(protectiveStop.Message, AppMessageKind.Error);
+            yield return new AppTurnCompleted(protectiveStop is null, Persisted: true);
             yield return new AppStateChanged(CreateState());
             yield return new AppNavigationChanged(
                 await CreateNavigationSnapshotAsync(cancellationToken));
