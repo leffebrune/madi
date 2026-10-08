@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using Madi.Core;
 using Madi.Networking;
 
@@ -25,23 +26,43 @@ public sealed class OpenAIOAuthProvider : IModelProvider
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var requestId = Guid.CreateVersion7().ToString();
+        request = request with
+        {
+            PromptCacheKey = string.Concat(request.PromptCacheKey.EnumerateRunes().Take(64).Select(rune => rune.ToString())),
+        };
+
+        var requestId = _sendPromptCacheKey && !string.IsNullOrWhiteSpace(request.PromptCacheKey)
+            ? request.PromptCacheKey
+            : Guid.CreateVersion7().ToString();
         var headers = new Dictionary<string, string>
         {
-            ["session-id"] = requestId,
+            ["session_id"] = requestId,
             ["x-client-request-id"] = requestId,
         };
 
-        await foreach (var item in OpenAIResponsesProtocol.StreamAsync(
+        await using var events = OpenAIResponsesProtocol.StreamAsync(
                            _client,
                            ProviderId,
                            request,
                            headers,
                            includeCodexExtensions: true,
                            cancellationToken,
-                           sendPromptCacheKey: _sendPromptCacheKey))
+                           sendPromptCacheKey: _sendPromptCacheKey).GetAsyncEnumerator(cancellationToken);
+        while (true)
         {
-            yield return item;
+            bool hasNext;
+            try
+            {
+                hasNext = await events.MoveNextAsync();
+            }
+            catch (Exception error) when ((error is HttpRequestException or InvalidOperationException)
+                && error.Message.Contains("subscription_sharing_usage_limit_exceeded", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"{error.Message}\nCheck your ChatGPT usage: https://chatgpt.com/settings/usage", error);
+            }
+            if (!hasNext) break;
+            yield return events.Current;
         }
     }
 }
