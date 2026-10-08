@@ -85,7 +85,7 @@ public sealed class WorkPromptTests
     }
 
     [Fact]
-    public async Task OpenAIProviderWritesWorkPromptAsFirstDeveloperInput()
+    public async Task OpenAIProviderWritesSystemAndWorkInstructionsBeforeConversation()
     {
         var provider = new OpenAIOAuthProvider(new CompletingNetworkClient());
         var request = new ModelRequest(
@@ -107,14 +107,16 @@ public sealed class WorkPromptTests
 
         using var document = JsonDocument.Parse(Assert.IsType<string>(body));
         var root = document.RootElement;
-        Assert.Equal("SYSTEM.md 내용", root.GetProperty("instructions").GetString());
+        Assert.False(root.TryGetProperty("instructions", out _));
         var input = root.GetProperty("input");
-        Assert.Equal(2, input.GetArrayLength());
+        Assert.Equal(3, input.GetArrayLength());
         Assert.Equal("developer", input[0].GetProperty("role").GetString());
+        Assert.Equal("SYSTEM.md 내용", input[0].GetProperty("content")[0].GetProperty("text").GetString());
+        Assert.Equal("developer", input[1].GetProperty("role").GetString());
         Assert.Equal(
             "<work_prompt>\n장기 목표와 제약\n</work_prompt>",
-            input[0].GetProperty("content")[0].GetProperty("text").GetString());
-        Assert.Equal("user", input[1].GetProperty("role").GetString());
+            input[1].GetProperty("content")[0].GetProperty("text").GetString());
+        Assert.Equal("user", input[2].GetProperty("role").GetString());
     }
 
     private sealed class RecordingProvider : IModelProvider
