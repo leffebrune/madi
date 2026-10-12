@@ -19,15 +19,15 @@ public sealed class FileModelCatalogTests
         Assert.True(File.Exists(modelsPath));
         Assert.Equal(3, models.Count);
 
-        Assert.Equal("gpt-5.6-luna", models[0].Name);
+        Assert.Equal("gpt-6-astra", models[0].Name);
         Assert.Equal("OpenAI", models[0].Provider);
         Assert.Equal("openai-codex", models[0].Api);
         Assert.Null(models[0].BaseUrl);
         Assert.True(models[0].SendPromptCacheKey);
         Assert.True(models[0].SupportsReasoning);
 
-        Assert.Equal("gpt-5.6-terra", models[1].Name);
-        Assert.Equal("gpt-5.6-sol", models[2].Name);
+        Assert.Equal("gpt-6-sol", models[1].Name);
+        Assert.Equal("gpt-6-luna", models[2].Name);
 
         using var document = JsonDocument.Parse(await File.ReadAllTextAsync(modelsPath));
         Assert.Equal(JsonValueKind.Array, document.RootElement.ValueKind);

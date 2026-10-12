@@ -159,6 +159,9 @@ public sealed class CatalogModelProvider : IModelProviderRuntime
                 Model = model.Name,
                 Provider = model.Provider,
             },
+            MaxOutputTokens = string.Equals(model.Api, OpenAIResponseProvider.ProviderId, StringComparison.OrdinalIgnoreCase)
+                ? model.MaxOutputTokens
+                : null,
         };
 
         await foreach (var item in provider.StreamAsync(routedRequest, cancellationToken))

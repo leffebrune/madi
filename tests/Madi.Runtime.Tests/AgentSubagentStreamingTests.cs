@@ -6,13 +6,17 @@ namespace Madi.Runtime.Tests;
 
 public sealed class AgentSubagentStreamingTests
 {
-    [Fact]
-    public async Task ParallelSubagentsStreamChildToolsWithParentCorrelation()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ParallelSubagentsStreamChildToolsWithParentCorrelation(bool parallel)
     {
+        var snapshot = new ProjectInstructions("/AGENTS.md", "project snapshot");
+        var tool = new StreamingSubagentTool(parallel, snapshot);
         var agent = new Agent(
             new ParallelSubagentProvider(),
             "Helpful assistant.",
-            [new StreamingSubagentTool()]);
+            [tool], projectInstructionLoader: new SnapshotLoader(snapshot));
         var session = new Session
         {
             Id = "session-1",
@@ -40,12 +44,18 @@ public sealed class AgentSubagentStreamingTests
         Assert.IsType<AgentResponseCompleted>(events[^1]);
     }
 
-    private sealed class StreamingSubagentTool : ISubagentTool
+    private sealed class SnapshotLoader(ProjectInstructions snapshot) : IProjectInstructionLoader
+    {
+        public Task<ProjectInstructions?> LoadAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<ProjectInstructions?>(snapshot);
+    }
+
+    private sealed class StreamingSubagentTool(bool parallel, ProjectInstructions expected) : ISubagentTool
     {
         public string Name => "subagent";
         public string Description => "Delegates work.";
         public JsonElement Parameters => JsonDocument.Parse("{}").RootElement.Clone();
-        public bool SupportsParallelExecution => true;
+        public bool SupportsParallelExecution => parallel;
 
         public string GetSubagentName(JsonElement arguments) =>
             arguments.GetProperty("name").GetString()!;
@@ -57,6 +67,16 @@ public sealed class AgentSubagentStreamingTests
             JsonElement arguments,
             CancellationToken cancellationToken = default) =>
             Task.FromResult("done");
+
+        public Task<string> ExecuteAsync(
+            JsonElement arguments,
+            ProjectInstructions? projectInstructions,
+            Func<SubagentRunEvent, ValueTask> onEvent,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Same(expected, projectInstructions);
+            return ExecuteAsync(arguments, onEvent, cancellationToken);
+        }
 
         public async Task<string> ExecuteAsync(
             JsonElement arguments,

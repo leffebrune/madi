@@ -331,3 +331,10 @@ public sealed record ReasoningEffortItemViewModel(
     string Key,
     string DisplayName,
     ReasoningEffort? Value);
+
+/// <summary>An additional instruction that is still waiting for delivery.</summary>
+public sealed class PendingInputViewModel(AgentInput input)
+{
+    public Guid Id => input.Id;
+    public string Text => input.Text;
+}

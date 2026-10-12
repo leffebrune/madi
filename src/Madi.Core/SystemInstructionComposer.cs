@@ -27,7 +27,11 @@ public static class SystemInstructionComposer
         ArgumentException.ThrowIfNullOrWhiteSpace(systemPrompt);
         ArgumentNullException.ThrowIfNull(tools);
 
-        var prompt = systemPrompt.Trim();
+        var prompt = systemPrompt.Trim() + "\n\n# Additional user instructions\n"
+            + "Additional user messages received during a task refine the current goal. "
+            + "Follow the latest user instruction where user instructions conflict; preserve non-conflicting requirements "
+            + "and continue to obey higher-priority instructions. Completed actions are not automatically undone. "
+            + "The current batch of tool calls finishes before additional instructions are supplied.";
         if (tools.Count == 0)
         {
             return prompt;

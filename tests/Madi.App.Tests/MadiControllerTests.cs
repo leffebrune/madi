@@ -8,6 +8,45 @@ namespace Madi.App.Tests;
 
 public sealed class MadiControllerTests
 {
+    [Theory]
+    [InlineData(AgentStopReason.RoundLimit)]
+    [InlineData(AgentStopReason.ToolLoop)]
+    public async Task ProtectiveStopCommitsConversationAndReportsFailure(AgentStopReason reason)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "madi-protection-" + Guid.NewGuid());
+        try
+        {
+            var store = new Madi.Runtime.Persistence.FileWorkSessionStore(root);
+            var agent = new StubAgent((session, _) =>
+            {
+                session.Conversation.AddRange([
+                    new UserMessage("run"),
+                    new ModelToolCall("test", "call", "test", "{}", "{}"),
+                    new ToolResult("call", "done"),
+                ]);
+                return Task.FromResult<IReadOnlyList<AgentEvent>>([
+                    new AgentResponseStopped(reason, "protective stop"),
+                ]);
+            });
+            var controller = new MadiController(agent, store,
+                new ModelOptions("first"), [Model("first")], new StubAuthentication(), root);
+            var events = await CollectAsync(controller.ExecuteAsync("run"));
+            Assert.Contains(events, e => e is AppTurnCompleted { Succeeded: false });
+            Assert.DoesNotContain(events, e => e is AppTurnCompleted { Succeeded: true });
+            Assert.Contains(events, e => e is AppMessage { Text: "protective stop", Kind: AppMessageKind.Error });
+            var restored = await new Madi.Runtime.Persistence.FileWorkSessionStore(root)
+                .LoadConversationAsync(controller.State.Session!.Id);
+            Assert.NotNull(restored);
+            Assert.Equal(3, restored.Session.Conversation.Count);
+            Assert.Equal("call", Assert.Single(restored.Session.Conversation.OfType<ToolResult>()).CallId);
+            Assert.Equal("run", restored.Session.Title);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
     [Fact]
     public void CommandCatalogHasTheSharedCommands()
     {
@@ -860,6 +899,53 @@ public sealed class MadiControllerTests
             UpdatedAtUtc = updatedAt,
             Model = new ModelOptions("first"),
         };
+
+    [Fact]
+    public async Task ProjectReadFailureIsVisibleAndNextTurnCanRunWithoutPersistingInstructions()
+    {
+        var root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString())).FullName;
+        try
+        {
+            var path = Path.Combine(root, "AGENTS.md");
+            await File.WriteAllBytesAsync(path, [0xff]);
+            var provider = new ProjectRecordingProvider();
+            var agent = new Agent(provider, "system", projectInstructionLoader:
+                new Madi.Runtime.Persistence.FileProjectInstructionLoader(root));
+            var store = new RecordingStore();
+            var controller = CreateController(agent, store);
+            var failed = await CollectAsync(controller.ExecuteAsync("first"));
+            Assert.Contains(failed, item => item is AppMessage { Kind: AppMessageKind.Error } message
+                && message.Text.Contains(path));
+            Assert.Equal(AppRunState.Idle, controller.State.RunState);
+            Assert.Empty(provider.Requests);
+            await File.WriteAllTextAsync(path, "project snapshot");
+            var completed = await CollectAsync(controller.ExecuteAsync("second"));
+            Assert.Contains(completed, item => item is AppTurnCompleted { Succeeded: true });
+            Assert.Equal(AppRunState.Idle, controller.State.RunState);
+            Assert.Equal("second", Assert.Single(store.LastSavedSession!.Conversation.OfType<UserMessage>()).Text);
+            Assert.Contains("project snapshot", Assert.Single(provider.Requests).WorkInstructions);
+            await File.WriteAllTextAsync(path, "updated snapshot");
+            var resumed = CreateController(agent, store);
+            await CollectAsync(resumed.ExecuteAsync("third"));
+            Assert.Contains("updated snapshot", provider.Requests[^1].WorkInstructions);
+            Assert.All(store.LastSavedSession!.Conversation.OfType<UserMessage>(),
+                message => Assert.DoesNotContain("snapshot", message.Text));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    private sealed class ProjectRecordingProvider : IModelProvider
+    {
+        public string Id => "test";
+        public List<ModelRequest> Requests { get; } = [];
+        public async IAsyncEnumerable<ModelEvent> StreamAsync(ModelRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            await Task.CompletedTask;
+            yield return new ModelResponseCompleted(new ModelResponse("response", "done", []));
+        }
+    }
 
     private static MadiController CreateController(
         IAgent? agent = null,

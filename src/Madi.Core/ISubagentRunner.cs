@@ -25,4 +25,10 @@ public interface ISubagentRunner
         string task,
         Func<SubagentRunEvent, ValueTask> onEvent,
         CancellationToken cancellationToken = default);
+    Task<string> RunAsync(
+        string name,
+        string task,
+        ProjectInstructions? projectInstructions,
+        Func<SubagentRunEvent, ValueTask> onEvent,
+        CancellationToken cancellationToken = default);
 }

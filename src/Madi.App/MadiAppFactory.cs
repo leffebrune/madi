@@ -61,7 +61,8 @@ public static class MadiAppFactory
         var systemInstructions = SystemInstructionComposer.Compose(systemPrompt, agentTools);
         IAgent agent = new Agent(
             provider, systemInstructions, agentTools,
-            runtimeContextProvider: () => tools.CreateRuntimeContext());
+            runtimeContextProvider: () => tools.CreateRuntimeContext(),
+            projectInstructionLoader: new FileProjectInstructionLoader(workingDirectory));
         var defaultAvailableModel = availableModels.FirstOrDefault()
             ?? throw new InvalidDataException("사용 가능한 모델이 없습니다.");
         var defaultModel = new ModelOptions(
