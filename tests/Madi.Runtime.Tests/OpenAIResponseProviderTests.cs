@@ -46,7 +46,7 @@ public sealed class OpenAIResponseProviderTests
     }
 
     [Fact]
-    public async Task OAuthProviderRetainsCodexHeadersAndRequestExtensions()
+    public async Task OAuthProviderUsesDirectResponsesSessionAndReasoningFields()
     {
         var client = RecordingNetworkClient.Completing();
         var provider = new OpenAIOAuthProvider(client);
@@ -60,14 +60,67 @@ public sealed class OpenAIResponseProviderTests
         await CollectAsync(provider.StreamAsync(request));
 
         Assert.NotNull(client.Headers);
-        var sessionId = client.Headers["session-id"];
-        Assert.False(string.IsNullOrWhiteSpace(sessionId));
+        var sessionId = client.Headers["session_id"];
+        Assert.Equal("cache-key", sessionId);
+        Assert.False(client.Headers.ContainsKey("session-id"));
         Assert.Equal(sessionId, client.Headers["x-client-request-id"]);
         using var document = JsonDocument.Parse(Assert.IsType<string>(client.Content));
         var root = document.RootElement;
-        Assert.Equal("low", root.GetProperty("text").GetProperty("verbosity").GetString());
+        Assert.False(root.TryGetProperty("text", out _));
+        Assert.False(root.TryGetProperty("instructions", out _));
+        Assert.Equal("developer", root.GetProperty("input")[0].GetProperty("role").GetString());
+        Assert.Equal("instructions", root.GetProperty("input")[0].GetProperty("content")[0].GetProperty("text").GetString());
+        Assert.False(root.TryGetProperty("temperature", out _));
+        Assert.False(root.TryGetProperty("max_output_tokens", out _));
+        Assert.False(root.TryGetProperty("prompt_cache_retention", out _));
+        Assert.False(root.TryGetProperty("prompt_cache_options", out _));
         Assert.Equal("reasoning.encrypted_content", root.GetProperty("include")[0].GetString());
         Assert.Equal("auto", root.GetProperty("reasoning").GetProperty("summary").GetString());
+    }
+
+    [Fact]
+    public async Task OAuthProviderClampsCacheAndSessionKeysWithoutSplittingUnicode()
+    {
+        var client = RecordingNetworkClient.Completing();
+        var provider = new OpenAIOAuthProvider(client);
+        var key = string.Concat(Enumerable.Repeat("😀", 65));
+        await CollectAsync(provider.StreamAsync(CreateRequest() with { PromptCacheKey = key }));
+        var expected = string.Concat(Enumerable.Repeat("😀", 64));
+        using var document = JsonDocument.Parse(client.Content!);
+        Assert.Equal(expected, document.RootElement.GetProperty("prompt_cache_key").GetString());
+        Assert.Equal(expected, client.Headers!["session_id"]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OAuthProviderExplainsSubscriptionUsageLimits(bool httpFailure)
+    {
+        const string code = "subscription_sharing_usage_limit_exceeded";
+        var client = new RecordingNetworkClient(
+            [new SseEvent("response.failed", $"{{\"response\":{{\"error\":{{\"code\":\"{code}\"}}}}}}")],
+            httpFailure ? new HttpRequestException(code, null, System.Net.HttpStatusCode.TooManyRequests) : null);
+        var provider = new OpenAIOAuthProvider(client);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => CollectAsync(provider.StreamAsync(CreateRequest())));
+        Assert.Contains(code, error.Message);
+        Assert.Contains("https://chatgpt.com/settings/usage", error.Message);
+    }
+
+    [Fact]
+    public async Task OAuthProviderReplaysOwnReasoningAndToolItemsWithExistingProviderId()
+    {
+        var client = RecordingNetworkClient.Completing();
+        var reasoning = new ModelOpaqueOutput(OpenAIOAuthProvider.ProviderId, "reasoning",
+            """{"type":"reasoning","id":"rs_existing","encrypted_content":"encrypted","summary":[]}""");
+        var call = new ModelToolCall(OpenAIOAuthProvider.ProviderId, "call_existing", "run", "{}",
+            """{"type":"function_call","id":"fc_existing","call_id":"call_existing","name":"run","arguments":"{}"}""");
+        await CollectAsync(new OpenAIOAuthProvider(client).StreamAsync(
+            CreateRequest([reasoning, call, new ToolResult("call_existing", "done")])));
+        using var document = JsonDocument.Parse(client.Content!);
+        var input = document.RootElement.GetProperty("input");
+        Assert.Equal("encrypted", input[1].GetProperty("encrypted_content").GetString());
+        Assert.Equal("call_existing", input[2].GetProperty("call_id").GetString());
+        Assert.Equal("function_call_output", input[3].GetProperty("type").GetString());
     }
 
     [Fact]
@@ -271,7 +324,7 @@ public sealed class OpenAIResponseProviderTests
         return result;
     }
 
-    private sealed class RecordingNetworkClient(IReadOnlyList<SseEvent> events) : INetworkClient
+    private sealed class RecordingNetworkClient(IReadOnlyList<SseEvent> events, Exception? failure = null) : INetworkClient
     {
         public string? Content { get; private set; }
         public IReadOnlyDictionary<string, string>? Headers { get; private set; }
@@ -290,6 +343,7 @@ public sealed class OpenAIResponseProviderTests
         {
             Content = content;
             Headers = headers;
+            if (failure is not null) throw failure;
             foreach (var item in events)
             {
                 cancellationToken.ThrowIfCancellationRequested();

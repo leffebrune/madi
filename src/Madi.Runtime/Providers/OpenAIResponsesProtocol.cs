@@ -121,17 +121,13 @@ internal static class OpenAIResponsesProtocol
             writer.WriteString("model", request.Options.Model);
             writer.WriteBoolean("store", false);
             writer.WriteBoolean("stream", true);
-            if (request.MaxOutputTokens is { } maxOutputTokens)
-            {
-                if (maxOutputTokens <= 0)
-                {
-                    throw new ArgumentOutOfRangeException(nameof(request), "MaxOutputTokens must be positive.");
-                }
-                writer.WriteNumber("max_output_tokens", maxOutputTokens);
-            }
-            writer.WriteString("instructions", request.Instructions);
+            if (!includeCodexExtensions) writer.WriteString("instructions", request.Instructions);
 
             writer.WriteStartArray("input");
+            if (includeCodexExtensions && !string.IsNullOrWhiteSpace(request.Instructions))
+            {
+                WriteMessage(writer, "developer", "input_text", request.Instructions);
+            }
             if (!string.IsNullOrWhiteSpace(request.WorkInstructions))
             {
                 WriteMessage(
@@ -148,9 +144,6 @@ internal static class OpenAIResponsesProtocol
 
             if (includeCodexExtensions)
             {
-                writer.WriteStartObject("text");
-                writer.WriteString("verbosity", "low");
-                writer.WriteEndObject();
                 writer.WriteStartArray("include");
                 writer.WriteStringValue("reasoning.encrypted_content");
                 writer.WriteEndArray();
@@ -167,7 +160,7 @@ internal static class OpenAIResponsesProtocol
                     writer.WriteString("description", tool.Description);
                     writer.WritePropertyName("parameters");
                     tool.Parameters.WriteTo(writer);
-                    writer.WriteNull("strict");
+                    if (!includeCodexExtensions) writer.WriteNull("strict");
                     writer.WriteEndObject();
                 }
                 writer.WriteEndArray();

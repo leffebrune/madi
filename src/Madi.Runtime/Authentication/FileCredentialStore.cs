@@ -9,10 +9,10 @@ public sealed class FileCredentialStore : ICredentialStore
 
     public FileCredentialStore(string? path = null)
     {
-        _path = path ?? Path.Combine(
+        _path = Path.GetFullPath(path ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "madi",
-            "auth.json");
+            "auth.json"));
     }
 
     public async Task<OAuthCredential?> LoadAsync(string providerId, CancellationToken cancellationToken = default)
@@ -22,6 +22,7 @@ public sealed class FileCredentialStore : ICredentialStore
         await FileLock.WaitAsync(cancellationToken);
         try
         {
+            using var processLock = await AcquireProcessLockAsync(cancellationToken);
             var credentials = await ReadAllAsync(cancellationToken);
             return credentials.GetValueOrDefault(providerId);
         }
@@ -42,6 +43,7 @@ public sealed class FileCredentialStore : ICredentialStore
         await FileLock.WaitAsync(cancellationToken);
         try
         {
+            using var processLock = await AcquireProcessLockAsync(cancellationToken);
             var credentials = await ReadAllAsync(cancellationToken);
             credentials[providerId] = credential;
             await WriteAllAsync(credentials, cancellationToken);
@@ -59,6 +61,7 @@ public sealed class FileCredentialStore : ICredentialStore
         await FileLock.WaitAsync(cancellationToken);
         try
         {
+            using var processLock = await AcquireProcessLockAsync(cancellationToken);
             var credentials = await ReadAllAsync(cancellationToken);
             if (credentials.Remove(providerId))
             {
@@ -68,6 +71,83 @@ public sealed class FileCredentialStore : ICredentialStore
         finally
         {
             FileLock.Release();
+        }
+    }
+
+    public async Task<OAuthCredential?> UpdateAsync(
+        string providerId,
+        Func<OAuthCredential?, Task<OAuthCredential?>> update,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateProviderId(providerId);
+        ArgumentNullException.ThrowIfNull(update);
+        await FileLock.WaitAsync(cancellationToken);
+        try
+        {
+            using var processLock = await AcquireProcessLockAsync(cancellationToken);
+            var credentials = await ReadAllAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var current = credentials.GetValueOrDefault(providerId);
+            var replacement = await update(current);
+            if (!ReferenceEquals(current, replacement))
+            {
+                if (replacement is null) credentials.Remove(providerId);
+                else credentials[providerId] = replacement;
+                // A refresh may have rotated the token; request cancellation must not discard it.
+                await WriteAllAsync(credentials, CancellationToken.None);
+            }
+            return replacement;
+        }
+        finally
+        {
+            FileLock.Release();
+        }
+    }
+
+    public async Task<Guid> GetOrCreateDeviceIdAsync(CancellationToken cancellationToken = default)
+    {
+        await FileLock.WaitAsync(cancellationToken);
+        try
+        {
+            using var processLock = await AcquireProcessLockAsync(cancellationToken);
+            var devicePath = $"{_path}.device-id";
+            if (File.Exists(devicePath))
+            {
+                return Guid.Parse(await File.ReadAllTextAsync(devicePath, cancellationToken));
+            }
+            var deviceId = Guid.NewGuid();
+            var temporaryPath = $"{devicePath}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                await File.WriteAllTextAsync(temporaryPath, deviceId.ToString(), CancellationToken.None);
+                File.Move(temporaryPath, devicePath);
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            }
+            return deviceId;
+        }
+        finally
+        {
+            FileLock.Release();
+        }
+    }
+
+    private async Task<FileStream> AcquireProcessLockAsync(CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_path))!);
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return new FileStream($"{_path}.lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException error) when ((error.HResult & 0xffff) is 32 or 33)
+            {
+                await Task.Delay(50, cancellationToken);
+            }
         }
     }
 
