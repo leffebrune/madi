@@ -21,15 +21,21 @@
                   Padding="6,2"
                   ColumnSpacing="4">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="{Binding DisplayTitle}"
+                <CheckBox IsChecked="{Binding IsSelectedForDeletion, Mode=OneWay}"
+                          Visibility="{Binding ShowsDeleteCheckbox, Converter={StaticResource BoolToVisibility}}"
+                          Click="OnSessionDeleteCheckBoxClick"
+                          MinWidth="0" VerticalAlignment="Center"
+                          AutomationProperties.Name="{Binding DisplayTitle}" />
+                <TextBlock Grid.Column="1" Text="{Binding DisplayTitle}"
                            VerticalAlignment="Center"
                            FontWeight="{Binding IsHeader, Converter={StaticResource HeaderWeight}}"
                            TextTrimming="CharacterEllipsis"
                            AutomationProperties.Name="{Binding DisplayTitle}" />
-                <Button Grid.Column="1"
+                <Button Grid.Column="2"
                         Width="28"
                         Height="28"
                         Padding="0"
@@ -215,7 +221,21 @@
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <TextBlock Text="대화" FontSize="20" FontWeight="SemiBold" Margin="6,6,6,12" />
+                    <StackPanel Margin="0,0,0,8" Spacing="8">
+                        <TextBlock Text="대화" FontSize="20" FontWeight="SemiBold" Margin="6,6,6,4" />
+                        <Button Content="선택 삭제" Click="OnStartSessionSelection"
+                                IsEnabled="{Binding CanChangeSessionSelection}"
+                                Visibility="{Binding IsSelectingSessions, Converter={StaticResource InverseBoolToVisibility}}"
+                                AutomationProperties.Name="여러 대화 선택 삭제" />
+                        <StackPanel Orientation="Horizontal" Spacing="8"
+                                    Visibility="{Binding IsSelectingSessions, Converter={StaticResource BoolToVisibility}}">
+                            <Button Content="{Binding DeleteSelectedSessionsLabel}" Click="OnDeleteSelectedSessions"
+                                    IsEnabled="{Binding CanDeleteSelectedSessions}"
+                                    AutomationProperties.Name="선택한 대화 삭제" />
+                            <Button Content="취소" Click="OnCancelSessionSelection"
+                                    IsEnabled="{Binding CanChangeSessionSelection}" />
+                        </StackPanel>
+                    </StackPanel>
                     <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
                         <Button Content="새 대화" Click="OnNewSessionMenu"
                                 IsEnabled="{Binding CanNavigate}"

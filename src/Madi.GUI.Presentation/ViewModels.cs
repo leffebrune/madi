@@ -311,6 +311,8 @@ public sealed record NavigationItemViewModel(
     bool IsActive = false,
     string Status = "")
 {
+    public bool ShowsDeleteCheckbox { get; init; }
+    public bool IsSelectedForDeletion { get; init; }
     public bool HasMenu => SessionId is not null || (IsHeader && WorkId is not null);
     public string DisplayTitle => Title + (Status.Length > 0 ? $" · {Status}" : "");
 }
