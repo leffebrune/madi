@@ -334,39 +334,74 @@ public sealed class WorkspaceCoordinator
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
-    private async Task DeleteAsync(TabId tabId, string? sessionId, string? workId, CancellationToken token)
+    public Task DeleteSessionsAsync(TabId tabId, IEnumerable<string> sessionIds, CancellationToken token = default)
+    {
+        var ids = sessionIds.ToHashSet(StringComparer.Ordinal);
+        return ids.Count == 0 ? Task.CompletedTask : DeleteAsync(tabId, null, null, token, ids);
+    }
+
+    private async Task DeleteAsync(TabId tabId, string? sessionId, string? workId, CancellationToken token,
+        HashSet<string>? sessionIds = null)
     {
         var tab = GetTab(tabId);
         var replace = false;
+        Exception? deletionError = null;
         await _changes.WaitAsync(token);
         try
         {
             var sessions = await _store.LoadSessionsAsync(token);
-            var targets = sessions.Where(s => sessionId is not null ? s.Id == sessionId : s.WorkId == workId).ToArray();
+            var targets = sessions.Where(s => sessionIds is not null ? sessionIds.Contains(s.Id)
+                : sessionId is not null ? s.Id == sessionId : s.WorkId == workId).ToArray();
             using var mutation = Ownership.BeginMutation(tabId, targets.Select(s => s.Id));
             if (workId is not null) await _store.DeleteWorkAsync(workId, token);
-            else if (sessionId is not null) await _store.DeleteSessionAsync(sessionId, token);
-            lock (_gate)
+            else
                 foreach (var target in targets)
                 {
-                    _runtimes.Remove(target.Id);
-                    replace |= tab.Selected?.SessionId == target.Id;
+                    try
+                    {
+                        if (!await _store.DeleteSessionAsync(target.Id, token))
+                            throw new IOException($"대화를 삭제하지 못했습니다: {target.Id}");
+                    }
+                    catch (Exception error) { deletionError = error; break; }
+                    lock (_gate)
+                    {
+                        _runtimes.Remove(target.Id);
+                        replace |= tab.Selected?.SessionId == target.Id;
+                    }
                 }
+            if (workId is not null)
+                lock (_gate)
+                    foreach (var target in targets)
+                    {
+                        _runtimes.Remove(target.Id);
+                        replace |= tab.Selected?.SessionId == target.Id;
+                    }
         }
         finally { _changes.Release(); }
         if (replace)
         {
-            var navigation = await GetNavigationAsync(token);
+            var navigation = await GetNavigationAsync(CancellationToken.None);
             var candidates = navigation.Works.SelectMany(w => w.Sessions).Concat(navigation.StandaloneSessions)
                 .OrderByDescending(s => s.UpdatedAtUtc);
             foreach (var candidate in candidates)
             {
-                try { if (await SelectAsync(tabId, candidate.Id, token)) { Changed?.Invoke(this, EventArgs.Empty); return; } }
+                try
+                {
+                    if (await SelectAsync(tabId, candidate.Id, CancellationToken.None))
+                    {
+                        Changed?.Invoke(this, EventArgs.Empty);
+                        if (deletionError is not null)
+                            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(deletionError).Throw();
+                        return;
+                    }
+                }
                 catch (SessionInUseException) { }
             }
-            await CreateSessionAsync(tabId, null, token: token);
+            await CreateSessionAsync(tabId, null, token: CancellationToken.None);
         }
         Changed?.Invoke(this, EventArgs.Empty);
+        if (deletionError is not null)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(deletionError).Throw();
     }
 
     public async Task CloseTabAsync(TabId tabId)

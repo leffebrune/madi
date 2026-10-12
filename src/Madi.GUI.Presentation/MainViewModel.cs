@@ -630,6 +630,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 if (runtime?.HasUnseenResult == true) status += " ● 미확인";
                 entry = entry with { Status = status.Trim() };
             }
+            entry = entry with
+            {
+                ShowsDeleteCheckbox = IsSelectingSessions && entry.SessionId is not null,
+                IsSelectedForDeletion = entry.SessionId is { } selectedId && _sessionsToDelete.Contains(selectedId),
+            };
             var existing = NavigationItems.FirstOrDefault(x => x.SessionId == entry.SessionId && x.WorkId == entry.WorkId && x.IsHeader == entry.IsHeader);
             if (existing is not null)
             {
@@ -640,6 +645,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             else NavigationItems.Insert(i, entry);
         }
         while (NavigationItems.Count > desired.Count) NavigationItems.RemoveAt(NavigationItems.Count - 1);
+        _sessionsToDelete.IntersectWith(desired.Where(x => x.SessionId is not null).Select(x => x.SessionId!));
+        NotifySessionSelection();
         OnPropertyChanged(nameof(SelectedNavigationItem));
     }
 
