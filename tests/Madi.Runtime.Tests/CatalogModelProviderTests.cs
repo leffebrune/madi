@@ -95,6 +95,47 @@ public sealed class CatalogModelProviderTests
         Assert.Empty(oauthProvider.Requests);
         var routed = Assert.Single(apiProvider.Requests);
         Assert.Equal("OpenAI API/api-model", routed.Options.QualifiedName);
+        Assert.Null(routed.MaxOutputTokens);
+    }
+
+    [Fact]
+    public async Task StreamRoutesConfiguredOutputTokenLimitToResponsesProvider()
+    {
+        var provider = new RecordingProvider("api");
+        var model = ApiModel("claude-model") with { MaxOutputTokens = 128000 };
+        var runtime = new CatalogModelProvider(
+            [model],
+            new RecordingOAuthAuthentication(),
+            _ => provider);
+        var request = new ModelRequest(
+            [new UserMessage("hello")], [],
+            new ModelOptions(model.Name, Provider: model.Provider),
+            "instructions", "cache-key");
+
+        await foreach (var _ in runtime.StreamAsync(request))
+        {
+        }
+
+        Assert.Equal(128000, Assert.Single(provider.Requests).MaxOutputTokens);
+    }
+
+    [Fact]
+    public async Task StreamDoesNotChangeCodexRequestsWithOutputTokenLimit()
+    {
+        var provider = new RecordingProvider("oauth");
+        var model = OAuthModel("oauth-model") with { MaxOutputTokens = 128000 };
+        var runtime = new CatalogModelProvider(
+            [model], new RecordingOAuthAuthentication(), _ => provider);
+        var request = new ModelRequest(
+            [new UserMessage("hello")], [],
+            new ModelOptions(model.Name, Provider: model.Provider),
+            "instructions", "cache-key");
+
+        await foreach (var _ in runtime.StreamAsync(request))
+        {
+        }
+
+        Assert.Null(Assert.Single(provider.Requests).MaxOutputTokens);
     }
 
     [Fact]

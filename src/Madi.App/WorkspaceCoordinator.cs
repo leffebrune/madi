@@ -213,10 +213,68 @@ public sealed class WorkspaceCoordinator
         await SelectAsync(tabId, id, token);
     }
 
-    public async Task ExecuteAsync(TabId tabId, AppAction action, CancellationToken token = default)
+    public Task ExecuteAsync(TabId tabId, AppAction action, CancellationToken token = default) =>
+        ExecuteCoreAsync(tabId, action, true, null, token);
+
+    /// <summary>Returns on acceptance, not completion. Admission shares the start/close gate,
+    /// and a captured session never follows later navigation.</summary>
+    public async Task SubmitPromptAsync(TabId tabId, string sessionId, Guid observedRunId,
+        Guid messageId, string text, CancellationToken token = default)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        text = text.Trim();
+        if (text.Length == 0) return;
+        var tab = GetTab(tabId);
+        var runtime = FindRuntime(sessionId) ?? throw new InvalidOperationException("세션을 찾을 수 없습니다.");
+        var input = new AgentInput(messageId, text);
+        while (true)
+        {
+            Task? finalizing = null;
+            var command = text.StartsWith('/');
+            await _changes.WaitAsync(token);
+            try
+            {
+                if (Ownership.Owner(sessionId) != tabId || tab.IsClosing || _closing)
+                    throw new InvalidOperationException("이 탭에서 입력을 전달할 수 없습니다.");
+                if (_authenticationBusy)
+                    throw new InvalidOperationException("공통 인증 작업이 진행 중입니다.");
+                if (runtime.HasAccepted(messageId)) return;
+                if (runtime.IsRunning)
+                {
+                    if (command)
+                        throw new InvalidOperationException("실행 중에는 명령어 대신 추가 작업 지시만 전송할 수 있습니다.");
+                    if (observedRunId != runtime.RunId)
+                        throw new InvalidOperationException("실행이 변경되었습니다. 현재 상태를 확인하고 다시 전송하세요.");
+                    if (runtime.TrySubmit(input, observedRunId)) return;
+                    finalizing = runtime.Completion;
+                }
+                else if (!command)
+                {
+                    // Holding _changes prevents a second submit/start or tab close from overtaking admission.
+                    await StartRuntimeAsync(tab, runtime, new SubmitPromptAction(text), token, messageId);
+                }
+            }
+            finally { _changes.Release(); }
+            if (finalizing is not null)
+            {
+                await finalizing.WaitAsync(token);
+                if (!runtime.CompletedSuccessfully)
+                    throw new InvalidOperationException("작업이 중단되었습니다. 내용을 확인하고 다시 전송하세요.");
+                continue;
+            }
+            if (command) await ExecuteCoreAsync(tabId, new SubmitPromptAction(text), false, sessionId, token);
+            else Changed?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+    }
+
+    private async Task ExecuteCoreAsync(TabId tabId, AppAction action, bool waitForCompletion,
+        string? expectedSessionId, CancellationToken token)
     {
         var tab = GetTab(tabId);
         var runtime = tab.Selected ?? throw new InvalidOperationException("선택한 세션이 없습니다.");
+        if (expectedSessionId is not null && runtime.SessionId != expectedSessionId)
+            throw new InvalidOperationException("선택한 세션이 변경되었습니다. 초안을 확인하세요.");
         if (action is SubmitPromptAction submit && submit.Text.TrimStart().StartsWith('/'))
         {
             var parts = submit.Text.Trim().Split([' ', '\t'], 2, StringSplitOptions.RemoveEmptyEntries);
@@ -251,44 +309,53 @@ public sealed class WorkspaceCoordinator
                 throw new InvalidOperationException("OAuth를 사용하는 실행 또는 저장 중에는 로그아웃할 수 없습니다. 작업 종료 후 다시 시도하세요.");
             if (action is DeleteConversationFromAction truncate && truncate.SessionId != runtime.SessionId)
                 throw new InvalidOperationException("현재 선택한 세션에서만 대화를 삭제할 수 있습니다.");
-            // Work is reloaded at acceptance. Agent takes an immutable per-turn prompt/model snapshot.
-            if (runtime.Controller.State.Work is { } currentWork)
-            {
-                var work = (await _store.LoadWorksAsync(token)).Single(w => w.Id == currentWork.Id);
-                runtime.Controller.RefreshWork(work);
-            }
-            var runId = Guid.NewGuid();
-            IDisposable lease = action is DeleteConversationFromAction
-                ? Ownership.BeginMutation(tabId, [runtime.SessionId])
-                : Ownership.BeginRun(tabId, runtime.SessionId, runId);
-            var authentication = action is LoginAction or LogoutAction;
-            if (authentication) _authenticationBusy = true;
-            operation = runtime.Start(action, runId, lease, () =>
-            {
-                SessionRuntime[] authenticationObservers = [];
-                lock (_gate)
-                {
-                    if (authentication)
-                    {
-                        _prototype.CopySharedAuthentication(runtime.Controller);
-                        authenticationObservers = _runtimes.Values.Select(r => r.Runtime).ToArray();
-                        foreach (var observer in authenticationObservers)
-                            observer.Controller.CopySharedAuthentication(runtime.Controller);
-                        _authenticationBusy = false;
-                    }
-                    runtime.HasUnseenResult = _active != tabId || tab.Selected != runtime;
-                }
-                foreach (var observer in authenticationObservers)
-                    observer.Publish(new AppStateChanged(observer.Controller.State));
-                Changed?.Invoke(this, EventArgs.Empty);
-            });
-            // Observe faults even when the initiating view is no longer present.
-            _ = operation.ContinueWith(t => _ = t.Exception, CancellationToken.None,
-                TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            operation = await StartRuntimeAsync(tab, runtime, action, token);
         }
         finally { _changes.Release(); }
         Changed?.Invoke(this, EventArgs.Empty);
-        await operation;
+        if (waitForCompletion) await operation;
+    }
+
+    // Caller owns _changes; this returns the execution task without awaiting it.
+    private async Task<Task> StartRuntimeAsync(WorkspaceTab tab, SessionRuntime runtime,
+        AppAction action, CancellationToken token, Guid? initialMessageId = null)
+    {
+        // Work is reloaded at acceptance. Agent takes an immutable per-turn prompt/model snapshot.
+        if (runtime.Controller.State.Work is { } currentWork)
+        {
+            var work = (await _store.LoadWorksAsync(token)).Single(w => w.Id == currentWork.Id);
+            runtime.Controller.RefreshWork(work);
+        }
+        if (tab.IsClosing || _closing) throw new InvalidOperationException("닫는 중인 탭입니다.");
+        var runId = Guid.NewGuid();
+        IDisposable lease = action is DeleteConversationFromAction
+            ? Ownership.BeginMutation(tab.Id, [runtime.SessionId])
+            : Ownership.BeginRun(tab.Id, runtime.SessionId, runId);
+        var authentication = action is LoginAction or LogoutAction;
+        if (authentication) _authenticationBusy = true;
+        var operation = runtime.Start(action, runId, lease, () =>
+        {
+            SessionRuntime[] authenticationObservers = [];
+            lock (_gate)
+            {
+                if (authentication)
+                {
+                    _prototype.CopySharedAuthentication(runtime.Controller);
+                    authenticationObservers = _runtimes.Values.Select(r => r.Runtime).ToArray();
+                    foreach (var observer in authenticationObservers)
+                        observer.Controller.CopySharedAuthentication(runtime.Controller);
+                    _authenticationBusy = false;
+                }
+                runtime.HasUnseenResult = _active != tab.Id || tab.Selected != runtime;
+            }
+            foreach (var observer in authenticationObservers)
+                observer.Publish(new AppStateChanged(observer.Controller.State));
+            Changed?.Invoke(this, EventArgs.Empty);
+        }, initialMessageId);
+        // Observe faults even when the initiating view is no longer present.
+        _ = operation.ContinueWith(t => _ = t.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+        return operation;
     }
 
     private bool HasOAuthRuns()

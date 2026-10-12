@@ -27,7 +27,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _isSignedIn;
     private bool _supportsOAuth;
     private string? _submittedDraft;
-    private TimelineItemViewModel? _pendingUserTimelineItem;
+    private readonly List<TimelineItemViewModel> _pendingUserTimelineItems = [];
+    private bool _submitting;
+    public ObservableCollection<PendingInputViewModel> PendingInputs { get; } = [];
 
     public MainViewModel(
         MadiController controller,
@@ -72,6 +74,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _draft, value))
             {
+                OnPropertyChanged(nameof(CanSubmitPrompt));
                 _ = RefreshSuggestionsAsync(value);
             }
         }
@@ -192,6 +195,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         get => _isBusy;
         private set
         {
+            OnPropertyChanged(nameof(CanSubmitPrompt));
             if (SetProperty(ref _isBusy, value))
             {
                 OnPropertyChanged(nameof(CanInteract));
@@ -208,13 +212,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     public bool CanInteract => !IsBusy;
+    public bool CanSubmitPrompt => !_submitting && !string.IsNullOrWhiteSpace(Draft)
+        && CanNavigate && (Runtime?.CanSubmitPrompt ?? !IsBusy);
     public bool CanToggleAuthentication => CanInteract && _supportsOAuth;
     public bool CanSelectReasoningEffort => CanInteract
         && Models.FirstOrDefault(model => string.Equals(
             model.Key,
             SelectedModelName,
             StringComparison.OrdinalIgnoreCase))?.SupportsReasoning == true;
-    public string SendButtonText => IsBusy ? "취소" : "전송";
+    public string SendButtonText => IsBusy ? "추가 지시 전송" : "전송";
 
     public bool IsSignedIn
     {
@@ -238,19 +244,44 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public Task SendOrCancelAsync()
-    {
-        if (IsBusy)
-        {
-            Cancel();
-            return Task.CompletedTask;
-        }
+    // Kept as an alias for existing callers; stopping is now always explicit.
+    public Task SendOrCancelAsync() => SendAsync();
 
+    public async Task SendAsync()
+    {
+        if (_submitting) return;
         var text = Draft.Trim();
-        _submittedDraft = text;
-        return text.Length == 0
-            ? Task.CompletedTask
-            : ExecuteAsync(new SubmitPromptAction(text));
+        if (text.Length == 0) return;
+        _submitting = true;
+        OnPropertyChanged(nameof(CanSubmitPrompt));
+        try
+        {
+            if (_tab is not null && Runtime is { } runtime)
+            {
+                var additional = runtime.IsRunning;
+                if (!additional) _submittedDraft = text;
+                await _tab.Workspace.SubmitPromptAsync(_tab.Tab.Id, runtime.SessionId,
+                    runtime.RunId, Guid.NewGuid(), text);
+                await _dispatcher.InvokeAsync(() =>
+                {
+                    // Initial prompts are acknowledged by AppUserInput. In particular,
+                    // do not erase a draft restored by an early authentication failure.
+                    if (additional && Draft.Trim() == text) Draft = string.Empty;
+                    Suggestions.Clear();
+                });
+            }
+            else
+            {
+                if (IsBusy) return;
+                _submittedDraft = text;
+                await ExecuteAsync(new SubmitPromptAction(text));
+            }
+        }
+        catch (Exception error)
+        {
+            await ApplyExternalEventAsync(new AppMessage(error.Message, AppMessageKind.Error));
+        }
+        finally { _submitting = false; OnPropertyChanged(nameof(CanSubmitPrompt)); }
     }
 
     public Task SelectModelAsync(string model) =>
@@ -389,31 +420,44 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 ApplyNavigation(navigation.Navigation);
                 break;
             case AppConversationLoaded conversation:
-                _pendingUserTimelineItem = null;
+                _pendingUserTimelineItems.Clear();
                 ApplyConversation(conversation.Conversation);
                 break;
             case AppConversationCleared:
-                _pendingUserTimelineItem = null;
+                _pendingUserTimelineItems.Clear();
                 Timeline.Clear();
                 UsageText = "사용량 정보 없음";
                 break;
             case AppUserInput user:
-                _pendingUserTimelineItem = new TimelineItemViewModel(
+                var userItem = new TimelineItemViewModel(
                     TimelineItemKind.User,
                     user.Text,
                     sessionId: user.SessionId,
                     conversationIndex: user.ConversationIndex);
-                _pendingUserTimelineItem.SetConversationInteraction(CanInteract);
-                Timeline.Add(_pendingUserTimelineItem);
+                userItem.SetConversationInteraction(CanInteract);
+                _pendingUserTimelineItems.Add(userItem);
+                Timeline.Add(userItem);
                 UsageText = "응답 사용량 계산 중…";
-                if (_tab is null || Draft.Trim() == user.Text) Draft = string.Empty;
+                if (user.MessageId is null && (_tab is null || Draft.Trim() == user.Text)) Draft = string.Empty;
                 Suggestions.Clear();
                 break;
+            case AppInputStatus input:
+                var pendingInput = PendingInputs.FirstOrDefault(entry => entry.Id == input.Input.Id);
+                if (input.State == InputDeliveryState.Pending)
+                {
+                    if (pendingInput is null) PendingInputs.Add(new PendingInputViewModel(input.Input));
+                }
+                else if (pendingInput is not null)
+                {
+                    PendingInputs.Remove(pendingInput);
+                }
+                break;
             case AppTurnCompleted completed:
-                if (completed.Succeeded)
+                if (!completed.Succeeded) PendingInputs.Clear();
+                if (completed.Succeeded || completed.Persisted)
                 {
                     _submittedDraft = null;
-                    _pendingUserTimelineItem?.MarkConversationItemPersisted();
+                    foreach (var pending in _pendingUserTimelineItems) pending.MarkConversationItemPersisted();
                 }
                 else
                 {
@@ -424,7 +468,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                         _submittedDraft = null;
                     }
                 }
-                _pendingUserTimelineItem = null;
+                _pendingUserTimelineItems.Clear();
                 break;
             case AppAssistantDelta delta:
                 var assistant = Timeline.LastOrDefault(static entry =>

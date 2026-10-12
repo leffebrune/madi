@@ -65,7 +65,7 @@ public sealed class SubagentRunner : ISubagentRunner
         string name,
         string task,
         CancellationToken cancellationToken = default) =>
-        RunCoreAsync(name, task, onEvent: null, cancellationToken);
+        RunCoreAsync(name, task, null, onEvent: null, cancellationToken);
 
     public Task<string> RunAsync(
         string name,
@@ -74,12 +74,24 @@ public sealed class SubagentRunner : ISubagentRunner
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(onEvent);
-        return RunCoreAsync(name, task, onEvent, cancellationToken);
+        return RunCoreAsync(name, task, null, onEvent, cancellationToken);
+    }
+
+    public Task<string> RunAsync(
+        string name,
+        string task,
+        ProjectInstructions? projectInstructions,
+        Func<SubagentRunEvent, ValueTask> onEvent,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(onEvent);
+        return RunCoreAsync(name, task, projectInstructions, onEvent, cancellationToken);
     }
 
     private async Task<string> RunCoreAsync(
         string name,
         string task,
+        ProjectInstructions? projectInstructions,
         Func<SubagentRunEvent, ValueTask>? onEvent,
         CancellationToken cancellationToken)
     {
@@ -109,7 +121,8 @@ public sealed class SubagentRunner : ISubagentRunner
             var systemInstructions = SystemInstructionComposer.Compose(
                 definition.Instructions,
                 childTools);
-            IAgent agent = new Agent(_provider, systemInstructions, childTools, _runtimeContextProvider);
+            IAgent agent = new Agent(_provider, systemInstructions, childTools, _runtimeContextProvider,
+                new FixedProjectInstructionLoader(projectInstructions));
             var session = new Session
             {
                 Id = $"subagent-{Guid.CreateVersion7()}",
@@ -139,6 +152,8 @@ public sealed class SubagentRunner : ISubagentRunner
                             completed.IsError,
                             completed.ToolDuration));
                         break;
+                    case AgentResponseStopped stopped:
+                        throw new InvalidOperationException($"Subagent '{definition.Name}': {stopped.Message}");
                     case AgentResponseCompleted completed:
                         result = completed.Text;
                         break;

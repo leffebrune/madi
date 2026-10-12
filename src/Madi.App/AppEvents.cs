@@ -17,7 +17,8 @@ public sealed record AppMessage(string Text, AppMessageKind Kind = AppMessageKin
 public sealed record AppUserInput(
     string Text,
     string? SessionId = null,
-    int? ConversationIndex = null) : AppEvent;
+    int? ConversationIndex = null,
+    Guid? MessageId = null) : AppEvent;
 
 public sealed record AppAssistantDelta(string Text) : AppEvent;
 
@@ -89,6 +90,10 @@ public sealed record AppConversationLoaded(ConversationSnapshot Conversation) : 
 
 public sealed record AppConversationCleared : AppEvent;
 
-public sealed record AppTurnCompleted(bool Succeeded, bool Canceled = false) : AppEvent;
+public sealed record AppTurnCompleted(bool Succeeded, bool Canceled = false, bool Persisted = false) : AppEvent;
 
 public sealed record AppExitRequested : AppEvent;
+
+public enum InputDeliveryState { Pending, Included, Interrupted }
+
+public sealed record AppInputStatus(AgentInput Input, InputDeliveryState State) : AppEvent;

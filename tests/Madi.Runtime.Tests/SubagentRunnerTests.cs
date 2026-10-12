@@ -8,8 +8,10 @@ namespace Madi.Runtime.Tests;
 
 public sealed class SubagentRunnerTests
 {
-    [Fact]
-    public async Task RunAsyncSendsInstructionsComposedWithChildToolMetadata()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunAsyncSendsInstructionsComposedWithChildToolMetadata(bool hasProject)
     {
         var provider = new RecordingProvider();
         var definition = new SubagentDefinition
@@ -35,9 +37,22 @@ public sealed class SubagentRunnerTests
             runtimeContextProvider: () => new AgentRuntimeContext(
                 new DateOnly(2026, 8, 15), "/workspace", "Test OS", "/bin/bash"));
 
-        await runner.RunAsync("reviewer", "Review this change.");
+        var root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString())).FullName;
+        ProjectInstructions? snapshot;
+        try
+        {
+            var path = Path.Combine(root, "AGENTS.md");
+            if (hasProject) await File.WriteAllTextAsync(path, "parent snapshot");
+            snapshot = await new Madi.Runtime.Persistence.FileProjectInstructionLoader(root).LoadAsync();
+            await File.WriteAllTextAsync(path, "changed after parent load");
+            var tool = new SubagentTool(runner, [definition]);
+            await tool.ExecuteAsync(JsonSerializer.SerializeToElement(new { name = "reviewer", task = "Review this change." }),
+                snapshot, _ => ValueTask.CompletedTask);
+        }
+        finally { Directory.Delete(root, true); }
 
         var request = Assert.Single(provider.Requests);
+        Assert.Equal(WorkInstructionComposer.Compose(snapshot, null), request.WorkInstructions);
         Assert.Equal("read", Assert.Single(request.Tools).Name);
         Assert.StartsWith("Review the requested code.", request.Instructions);
         Assert.Contains("# Available tools", request.Instructions);
