@@ -413,6 +413,13 @@ public sealed partial class WorkspaceTabPage : Page
 
     private async void OnNavigationItemClick(object sender, ItemClickEventArgs e)
     {
+        if (_viewModel is { IsSelectingSessions: true } selection)
+        {
+            if (e.ClickedItem is NavigationItemViewModel { SessionId: { } selectedId } item)
+                selection.SetSessionSelectedForDeletion(selectedId, !item.IsSelectedForDeletion);
+            NavigationList.SelectedItem = selection.SelectedNavigationItem;
+            return;
+        }
         if (_viewModel is not null && e.ClickedItem is NavigationItemViewModel { IsHeader: false, SessionId: { } id })
         {
             await _viewModel.ActivateSessionAsync(id);
@@ -421,8 +428,44 @@ public sealed partial class WorkspaceTabPage : Page
                 .FirstOrDefault(x => x.SessionId == _viewModel.CurrentSessionId));
         }
     }
+    private void OnStartSessionSelection(object sender, RoutedEventArgs e) =>
+        _viewModel?.SetSessionSelectionMode(true);
+
+    private void OnCancelSessionSelection(object sender, RoutedEventArgs e) =>
+        _viewModel?.SetSessionSelectionMode(false);
+
+    private void OnSessionDeleteCheckBoxClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is CheckBox { DataContext: NavigationItemViewModel { SessionId: { } id } } checkbox)
+            _viewModel?.SetSessionSelectedForDeletion(id, checkbox.IsChecked == true);
+    }
+
+    private async void OnDeleteSelectedSessions(object sender, RoutedEventArgs e) =>
+        await ConfirmAndDeleteSelectedSessionsAsync();
+
+    private async Task ConfirmAndDeleteSelectedSessionsAsync()
+    {
+        if (_navigationDeleteInProgress || _viewModel is not { CanDeleteSelectedSessions: true } view) return;
+        _navigationDeleteInProgress = true;
+        try
+        {
+            var dialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = $"대화 {view.SelectedSessionCount}개를 삭제할까요?",
+                Content = "선택한 대화와 모든 기록이 영구적으로 삭제됩니다.",
+                PrimaryButtonText = "삭제",
+                CloseButtonText = "취소",
+                DefaultButton = ContentDialogButton.Close,
+            };
+            if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+                await view.DeleteSelectedSessionsAsync();
+        }
+        finally { _navigationDeleteInProgress = false; }
+    }
     private void OnNavigationMenuClick(object sender, RoutedEventArgs e)
     {
+        if (_viewModel?.IsSelectingSessions == true) return;
         if (sender is not Button { DataContext: NavigationItemViewModel item } button)
         {
             return;
@@ -454,6 +497,20 @@ public sealed partial class WorkspaceTabPage : Page
 
     private async void OnNavigationPreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (_viewModel is { IsSelectingSessions: true })
+        {
+            if (e.Key == VirtualKey.Escape)
+            {
+                e.Handled = true;
+                _viewModel.SetSessionSelectionMode(false);
+            }
+            else if (e.Key == VirtualKey.Delete)
+            {
+                e.Handled = true;
+                await ConfirmAndDeleteSelectedSessionsAsync();
+            }
+            return;
+        }
         if (e.Key != VirtualKey.Delete
             || _viewModel is not { CanInteract: true }
             || NavigationList.SelectedItem is not NavigationItemViewModel { HasMenu: true } item)

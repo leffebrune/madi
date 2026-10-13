@@ -14,6 +14,108 @@ public sealed class WorkspaceViewModelTests
     private static Task Wait(Task task) => task.WaitAsync(TimeSpan.FromSeconds(5));
 
     [Fact]
+    public async Task SessionSelectionSurvivesRefreshAndCancelClearsCheckboxes()
+    {
+        await using var h = new WorkspaceHarness();
+        var tab = await h.Workspace.InitializeAsync();
+        await h.Workspace.CreateSessionAsync(tab.Id, null);
+        using var view = new WorkspaceTabViewModel(h.Workspace, tab, new Dispatcher());
+        await view.SynchronizeAsync();
+        var current = view.Current!;
+        var session = current.NavigationItems.First(x => x.SessionId is not null);
+        current.SetSessionSelectionMode(true);
+        current.SetSessionSelectedForDeletion(session.SessionId!, true);
+        await current.RefreshNavigationAsync();
+        Assert.True(current.CanDeleteSelectedSessions);
+        Assert.Equal(1, current.SelectedSessionCount);
+        Assert.True(current.NavigationItems.Single(x => x.SessionId == session.SessionId).IsSelectedForDeletion);
+        Assert.All(current.NavigationItems.Where(x => x.IsHeader), x => Assert.False(x.ShowsDeleteCheckbox));
+        Assert.All(current.NavigationItems.Where(x => x.SessionId is not null), x => Assert.True(x.ShowsDeleteCheckbox));
+        current.SetSessionSelectionMode(false);
+        Assert.False(current.CanDeleteSelectedSessions);
+        Assert.Equal(0, current.SelectedSessionCount);
+        Assert.All(current.NavigationItems, x =>
+        {
+            Assert.False(x.ShowsDeleteCheckbox);
+            Assert.False(x.IsSelectedForDeletion);
+        });
+    }
+
+    [Fact]
+    public async Task BulkDeletionRemovesSelectedSessionsAndReplacesDeletedCurrentSessionOnce()
+    {
+        await using var h = new WorkspaceHarness();
+        var tab = await h.Workspace.InitializeAsync();
+        var keep = tab.Selected!.SessionId;
+        await h.Workspace.CreateSessionAsync(tab.Id, null);
+        var first = tab.Selected!.SessionId;
+        await h.Workspace.CreateSessionAsync(tab.Id, null);
+        var second = tab.Selected!.SessionId;
+        using var view = new WorkspaceTabViewModel(h.Workspace, tab, new Dispatcher());
+        await view.SynchronizeAsync();
+        var current = view.Current!;
+        current.SetSessionSelectionMode(true);
+        current.SetSessionSelectedForDeletion(first, true);
+        current.SetSessionSelectedForDeletion(second, true);
+        await current.DeleteSelectedSessionsAsync();
+        await view.SynchronizeAsync();
+        Assert.Equal(keep, Assert.Single(await h.Store.LoadSessionsAsync()).Id);
+        Assert.Equal(keep, view.Current!.CurrentSessionId);
+        Assert.False(current.IsSelectingSessions);
+        Assert.Null(h.Workspace.FindRuntime(first));
+        Assert.Null(h.Workspace.FindRuntime(second));
+    }
+
+    [Fact]
+    public async Task BulkDeletionOfAllSessionsCreatesOneNewConversation()
+    {
+        await using var h = new WorkspaceHarness();
+        var tab = await h.Workspace.InitializeAsync();
+        await h.Workspace.CreateSessionAsync(tab.Id, null);
+        var ids = (await h.Store.LoadSessionsAsync()).Select(x => x.Id).ToArray();
+        await h.Workspace.DeleteSessionsAsync(tab.Id, ids.Concat(ids));
+        var remaining = Assert.Single(await h.Store.LoadSessionsAsync());
+        Assert.DoesNotContain(remaining.Id, ids);
+        Assert.Equal(remaining.Id, tab.Selected!.SessionId);
+    }
+
+    [Fact]
+    public async Task BulkDeletionChecksOwnershipBeforeDeletingAnySessionAndKeepsSelectionOnFailure()
+    {
+        await using var h = new WorkspaceHarness();
+        var tab = await h.Workspace.InitializeAsync();
+        var other = await h.Workspace.NewTabAsync(tab.Id);
+        using var view = new WorkspaceTabViewModel(h.Workspace, tab, new Dispatcher());
+        await view.SynchronizeAsync();
+        var current = view.Current!;
+        current.SetSessionSelectionMode(true);
+        current.SetSessionSelectedForDeletion(tab.Selected!.SessionId, true);
+        current.SetSessionSelectedForDeletion(other.Selected!.SessionId, true);
+        await current.DeleteSelectedSessionsAsync();
+        Assert.Equal(2, (await h.Store.LoadSessionsAsync()).Count);
+        Assert.True(current.IsSelectingSessions);
+        Assert.Equal(2, current.SelectedSessionCount);
+        Assert.True(current.CanDeleteSelectedSessions);
+        Assert.NotNull(current.ErrorText);
+    }
+
+    [Fact]
+    public async Task BulkDeletionRejectsRunningSessionBeforeDeletingOtherTargets()
+    {
+        await using var h = new WorkspaceHarness();
+        var tab = await h.Workspace.InitializeAsync();
+        var runningId = tab.Selected!.SessionId;
+        var run = h.Workspace.ExecuteAsync(tab.Id, new SubmitPromptAction("bulk test"));
+        await Wait(h.Agent.Run("bulk test").Started.Task);
+        await h.Workspace.CreateSessionAsync(tab.Id, null);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => h.Workspace.DeleteSessionsAsync(
+            tab.Id, new[] { tab.Selected!.SessionId, runningId }));
+        Assert.Equal(2, (await h.Store.LoadSessionsAsync()).Count);
+        h.Agent.Run("bulk test").Release.SetResult();
+        await Wait(run);
+    }
+
+    [Fact]
     public void A15_TypingDuringSaveAndLaterBroadcastArePreserved()
     {
         var editor = new WorkEditorState("base") { Draft = "submitted" };
