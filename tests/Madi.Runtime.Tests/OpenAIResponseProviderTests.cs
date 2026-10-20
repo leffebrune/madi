@@ -55,7 +55,8 @@ public sealed class OpenAIResponseProviderTests
             [],
             new ModelOptions("gpt-test", ReasoningEffort.Medium),
             "instructions",
-            "cache-key");
+            "cache-key",
+            MaxOutputTokens: 128000);
 
         await CollectAsync(provider.StreamAsync(request));
 

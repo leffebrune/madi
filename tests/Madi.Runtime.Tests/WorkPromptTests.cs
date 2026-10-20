@@ -87,11 +87,8 @@ public sealed class WorkPromptTests
     [Fact]
     public async Task OpenAIProviderWritesSystemAndWorkInstructionsBeforeConversation()
     {
-        IModelProvider provider = responses
-            ? new OpenAIResponseProvider(new CompletingNetworkClient())
-            : new OpenAIOAuthProvider(new CompletingNetworkClient());
-        var instructions = WorkInstructionComposer.Compose(
-            project ? new ProjectInstructions("/AGENTS.md", "project instructions") : null, "장기 목표와 제약");
+        IModelProvider provider = new OpenAIOAuthProvider(new CompletingNetworkClient());
+        var instructions = WorkInstructionComposer.Compose(null, "장기 목표와 제약");
         var request = new ModelRequest(
             [new UserMessage("현재 요청")],
             [],
@@ -132,7 +129,7 @@ public sealed class WorkPromptTests
             ? new OpenAIResponseProvider(new CompletingNetworkClient())
             : new OpenAIOAuthProvider(new CompletingNetworkClient());
         var request = new ModelRequest([new UserMessage("request")], [], new ModelOptions("test"),
-            "system", "session", WorkInstructions: WorkInstructionComposer.Compose(null, "  "));
+            "", "session", WorkInstructions: WorkInstructionComposer.Compose(null, "  "));
         string? body = null;
         await foreach (var item in provider.StreamAsync(request))
         {
