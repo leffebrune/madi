@@ -206,6 +206,22 @@ public sealed class MadiControllerTests
     }
 
     [Fact]
+    public async Task UnexpectedCancellationReportsExceptionAndInnerCause()
+    {
+        var agent = new StubAgent((_, _) =>
+            throw new TaskCanceledException("A task was canceled.", new IOException("stream reset")));
+        var controller = CreateController(agent);
+
+        var events = await CollectAsync(controller.ExecuteAsync("질문"));
+
+        var error = Assert.Single(events.OfType<AppMessage>(), item => item.Kind == AppMessageKind.Error);
+        Assert.Contains("TaskCanceledException", error.Text);
+        Assert.Contains("작업 취소 요청: False", error.Text);
+        Assert.Contains("stream reset", error.Text);
+        Assert.Contains(events, item => item is AppTurnCompleted { Succeeded: false, Canceled: false });
+    }
+
+    [Fact]
     public async Task ConcurrentInputIsRejectedWithoutWaiting()
     {
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

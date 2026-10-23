@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
@@ -30,25 +31,121 @@ public sealed class NetworkClient : INetworkClient
             ? null
             : await _options.GetHeadersAsync(cancellationToken);
         using var request = CreateRequest(content, dynamicHeaders, headers);
-        using var response = await _httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
-
-        if (!response.IsSuccessStatusCode)
+        var elapsed = Stopwatch.StartNew();
+        HttpResponseMessage response;
+        try
         {
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            response = await _httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+        }
+        catch (OperationCanceledException exception)
+        {
+            throw ExplainCancellation(exception, "waiting for response headers", elapsed, cancellationToken);
+        }
+        catch (HttpRequestException exception)
+        {
             throw new HttpRequestException(
-                $"Network request failed ({(int)response.StatusCode} {response.ReasonPhrase}): {body}",
-                null,
-                response.StatusCode);
+                $"Model HTTP request failed while waiting for response headers "
+                + $"(host: {_options.Endpoint.Host}, elapsed: {elapsed.Elapsed}, "
+                + $"caller canceled: {cancellationToken.IsCancellationRequested}): {exception.Message}",
+                exception, exception.StatusCode);
         }
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await foreach (var item in SseParser.ParseAsync(stream, cancellationToken))
+        using (response)
         {
-            yield return item;
+            if (!response.IsSuccessStatusCode)
+            {
+                string body;
+                try
+                {
+                    body = await response.Content.ReadAsStringAsync(cancellationToken);
+                }
+                catch (OperationCanceledException exception)
+                {
+                    throw ExplainCancellation(exception, "reading HTTP error body", elapsed,
+                        cancellationToken, response);
+                }
+                throw new HttpRequestException(
+                    $"Network request failed ({(int)response.StatusCode} {response.ReasonPhrase}, "
+                    + $"{ResponseDetails(response)}, elapsed: {elapsed.Elapsed}): {body}",
+                    null,
+                    response.StatusCode);
+            }
+
+            Stream stream;
+            try
+            {
+                stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            }
+            catch (OperationCanceledException exception)
+            {
+                throw ExplainCancellation(exception, "opening SSE stream", elapsed, cancellationToken, response);
+            }
+            await using (stream)
+            {
+                await using var events = SseParser.ParseAsync(stream, cancellationToken)
+                    .GetAsyncEnumerator(cancellationToken);
+                var eventCount = 0;
+                while (true)
+                {
+                    bool hasNext;
+                    try
+                    {
+                        hasNext = await events.MoveNextAsync();
+                    }
+                    catch (OperationCanceledException exception)
+                    {
+                        throw ExplainCancellation(exception, $"reading SSE stream (events received: {eventCount})",
+                            elapsed, cancellationToken, response);
+                    }
+                    catch (IOException exception)
+                    {
+                        throw new IOException($"Model SSE stream failed (events received: {eventCount}, "
+                            + $"{ResponseDetails(response)}, elapsed: {elapsed.Elapsed}): {exception.Message}", exception);
+                    }
+                    if (!hasNext) break;
+                    eventCount++;
+                    yield return events.Current;
+                }
+            }
         }
+    }
+
+    private TaskCanceledException ExplainCancellation(
+        OperationCanceledException exception,
+        string phase,
+        Stopwatch elapsed,
+        CancellationToken cancellationToken,
+        HttpResponseMessage? response = null)
+    {
+        var details = response is null
+            ? $"host: {_options.Endpoint.Host}, HTTP response: not received"
+            : ResponseDetails(response);
+        return new TaskCanceledException(
+            $"Model HTTP request canceled while {phase} ({details}, elapsed: {elapsed.Elapsed}, "
+            + $"caller canceled: {cancellationToken.IsCancellationRequested}, "
+            + $"HttpClient timeout: {_httpClient.Timeout}). "
+            + $"Original: {exception.GetType().Name}: {exception.Message}"
+            + (exception.InnerException is { } inner
+                ? $"; inner: {inner.GetType().Name}: {inner.Message}"
+                : string.Empty),
+            exception);
+    }
+
+    private static string ResponseDetails(HttpResponseMessage response)
+    {
+        var details = $"HTTP {(int)response.StatusCode}";
+        foreach (var name in new[] { "x-request-id", "apim-request-id", "request-id" })
+        {
+            if (response.Headers.TryGetValues(name, out var values))
+            {
+                var value = string.Join(", ", values).Replace('\r', ' ').Replace('\n', ' ');
+                details += $", {name}: {value[..Math.Min(value.Length, 128)]}";
+            }
+        }
+        return details;
     }
 
     private HttpRequestMessage CreateRequest(

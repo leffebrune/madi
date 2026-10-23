@@ -241,7 +241,13 @@ public sealed partial class MadiController
                 }
                 else
                 {
-                    yield return new AppMessage($"오류: {failure.Message}", AppMessageKind.Error);
+                    var details = failure is OperationCanceledException cancellationFailure
+                        ? $"{failure.Message}\n" +
+                          $"예외: {failure.GetType().FullName}; 작업 취소 요청: {cancellationToken.IsCancellationRequested}; " +
+                          $"예외 토큰 취소됨: {cancellationFailure.CancellationToken.IsCancellationRequested}; " +
+                          $"내부 예외: {FormatInnerException(failure.InnerException)}"
+                        : failure.Message;
+                    yield return new AppMessage($"오류: {details}", AppMessageKind.Error);
                 }
 
                 yield return new AppTurnCompleted(false);
@@ -254,6 +260,16 @@ public sealed partial class MadiController
         }
 
         yield return new AppStateChanged(CreateState());
+    }
+
+    private static string FormatInnerException(Exception? exception) => exception is null
+        ? "없음"
+        : string.Join(" -> ", EnumerateInnerExceptions(exception));
+
+    private static IEnumerable<string> EnumerateInnerExceptions(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+            yield return $"{current.GetType().Name}: {current.Message}";
     }
 
     private async IAsyncEnumerable<AppEvent> ExecuteCoreAsync(
