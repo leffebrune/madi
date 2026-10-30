@@ -71,3 +71,14 @@ dotnet test .\madi.sln
 ```
 
 프로젝트 구성과 의존성은 [ARCHITECTURE.md](ARCHITECTURE.md)를 참고하세요.
+
+## GitHub Actions 빌드 및 릴리즈
+
+`master` 브랜치의 푸시, 풀 리퀘스트, 수동 실행 시 Windows 러너에서 테스트와 GUI 배포 빌드를 수행하고 `Madi.GUI-win-x64` 아티팩트를 업로드합니다. `v`로 시작하는 태그를 푸시하면 테스트와 빌드가 성공한 뒤 `Madi.GUI.exe`가 첨부된 GitHub Release를 자동으로 생성합니다.
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+릴리즈가 게시되지 않으면 저장소의 Actions 권한 및 워크플로 실행 설정을 확인하세요. EXE는 Windows x64용이며 코드 서명은 포함되지 않습니다.
