@@ -74,7 +74,7 @@ dotnet test .\madi.sln
 
 ## GitHub Actions 빌드 및 릴리즈
 
-`master` 브랜치의 푸시, 풀 리퀘스트, 수동 실행 시 Windows 러너에서 테스트와 GUI 배포 빌드를 수행하고 `Madi.GUI-win-x64` 아티팩트를 업로드합니다. `v`로 시작하는 태그를 푸시하면 테스트와 빌드가 성공한 뒤 `Madi.GUI.exe`가 첨부된 GitHub Release를 자동으로 생성합니다.
+`v`로 시작하는 태그를 푸시할 때만 Windows 러너에서 테스트와 GUI 배포 빌드를 수행합니다. 빌드가 성공하면 `Madi.GUI.exe`가 첨부된 GitHub Release를 자동으로 생성합니다. 일반 브랜치 푸시나 풀 리퀘스트에서는 실행되지 않습니다.
 
 ```bash
 git tag v1.0.0
